@@ -157,6 +157,8 @@ class SendAttempt:
 
 
 def payload_hash(recipient: Recipient, body: str) -> str:
+    if type(recipient) is not Recipient:
+        raise ValueError("canonical_recipient_required")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("a non-empty text body is required")
     payload = json.dumps([recipient.key, body], ensure_ascii=False, separators=(",", ":"))

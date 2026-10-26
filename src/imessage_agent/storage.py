@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import sqlite3
@@ -75,6 +76,19 @@ PRAGMA user_version = 1;
 """
 
 
+_OUTBOUND_SCHEMA = """
+CREATE TABLE outbound_claims (
+    attempt_id TEXT PRIMARY KEY REFERENCES send_attempts(id),
+    body_hash TEXT NOT NULL,
+    reply_source TEXT,
+    reply_guid TEXT,
+    UNIQUE(reply_source, reply_guid),
+    CHECK((reply_source IS NULL) = (reply_guid IS NULL))
+);
+PRAGMA user_version = 2;
+"""
+
+
 def _identifier(value: str) -> None:
     if not isinstance(value, str) or not value.strip() or len(value) > 128:
         raise ValueError("identifiers must contain 1 to 128 characters")
@@ -113,8 +127,10 @@ class Store:
                 tables = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
                 if tables:
                     raise ValueError("refusing an unrecognized database")
-                self.connection.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA + "\nCOMMIT;")
-            elif version != 1:
+                self.connection.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA + _OUTBOUND_SCHEMA + "\nCOMMIT;")
+            elif version == 1:
+                self.connection.executescript("BEGIN IMMEDIATE;\n" + _OUTBOUND_SCHEMA + "\nCOMMIT;")
+            elif version != 2:
                 raise ValueError("unsupported agent schema version")
         except BaseException:
             self.connection.close()
@@ -253,11 +269,18 @@ class Store:
 
     def claim_send(
         self, attempt_id: str, recipient: Recipient, body: str,
-        approval_id: str | None, now: float,
+        approval_id: str | None, now: float, *, controlled: bool = False,
+        reply_to: tuple[str, str] | None = None,
     ) -> tuple[SendAttempt, bool]:
         _identifier(attempt_id)
         _finite(now)
         digest = payload_hash(recipient, body)
+        body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        if reply_to is not None:
+            if not isinstance(reply_to, tuple) or len(reply_to) != 2:
+                raise ValueError("reply_context_requires_source_and_guid")
+            for value in reply_to:
+                _identifier(value)
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             previous = self.attempt(attempt_id)
@@ -276,6 +299,35 @@ class Store:
                 denial = "Approval has expired"
             elif approval.consumed_by:
                 denial = "Approval was already consumed"
+            if not denial and reply_to is not None:
+                source_message = self.connection.execute(
+                    "SELECT direction,sender_key,body FROM messages WHERE source_id=? AND guid=?", reply_to,
+                ).fetchone()
+                if (source_message is None or source_message["direction"] != "inbound"
+                        or source_message["sender_key"] != recipient.key or source_message["body"] is None):
+                    denial = "reply_context_not_inbound"
+                elif self.connection.execute(
+                    "SELECT 1 FROM outbound_claims WHERE reply_source=? AND reply_guid=?", reply_to,
+                ).fetchone():
+                    denial = "reply_already_reserved"
+                elif self.connection.execute(
+                    "SELECT 1 FROM outbound_claims WHERE body_hash=?",
+                    (hashlib.sha256(source_message["body"].encode("utf-8")).hexdigest(),),
+                ).fetchone():
+                    denial = "agent_message_loop"
+            if not denial and controlled:
+                if self.connection.execute(
+                    "SELECT 1 FROM outbound_claims c JOIN send_attempts a ON a.id=c.attempt_id "
+                    "WHERE a.recipient_key=? AND a.payload_hash=?", (recipient.key, digest),
+                ).fetchone():
+                    denial = "payload_already_reserved"
+                counts = self.connection.execute(
+                    "SELECT COUNT(*),COALESCE(SUM(a.recipient_key=?),0) FROM outbound_claims c "
+                    "JOIN send_attempts a ON a.id=c.attempt_id WHERE a.created_at>?",
+                    (recipient.key, now - 60),
+                ).fetchone()
+                if not denial and (counts[0] >= 3 or counts[1] >= 1):
+                    denial = "rate_limited"
             outcome = SendOutcome(SendStatus.FAILED, denial) if denial else SendOutcome(
                 SendStatus.UNKNOWN, "Dispatch reserved; outcome may require reconciliation"
             )
@@ -285,6 +337,11 @@ class Store:
                  approval.id if approval else None, outcome.status.value, outcome.detail, None, now),
             )
             if not denial:
+                if controlled or reply_to is not None:
+                    self.connection.execute(
+                        "INSERT INTO outbound_claims VALUES (?,?,?,?)",
+                        (attempt_id, body_hash, *(reply_to if reply_to else (None, None))),
+                    )
                 self.connection.execute("UPDATE approvals SET consumed_by=? WHERE id=?", (attempt_id, approval.id))
         return self.attempt(attempt_id), not denial
 
