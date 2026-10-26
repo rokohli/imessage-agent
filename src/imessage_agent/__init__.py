@@ -1,1 +1,1 @@
-"""Mock-only messaging foundation. Importing performs no I/O."""
+"""Read-only ingestion and disabled-by-default controlled sending. Importing performs no I/O."""
