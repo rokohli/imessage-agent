@@ -43,6 +43,7 @@ def add_commands(commands):
             p.add_argument('--grace', type=int, default=300, help='Seconds late allowed; never past a random window end')
             p.add_argument('--transport', choices=('mock', 'live'), default='mock')
         if name == 'scheduler-run':
+            p.add_argument('--id', help='Process only this authorized schedule')
             mode = p.add_mutually_exclusive_group()
             mode.add_argument('--dry-run', action='store_true', help='Default: read-only, no claims or dispatch')
             mode.add_argument('--execute-mock', action='store_true', help='Persist outcomes using synthetic transport only')
@@ -129,7 +130,7 @@ def run_command(args):
             else:
                 while True:
                     report = {'dry_run': dry, 'results': scheduler.tick(dry_run=dry, live=args.execute_live,
-                                                                       limit=args.limit)}
+                                                                       limit=args.limit, plan_id=args.id)}
                     if not args.watch:
                         break
                     print(json.dumps(report, ensure_ascii=True), flush=True)

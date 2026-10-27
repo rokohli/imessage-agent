@@ -11,7 +11,10 @@ separate authorization and explicit trusted in-process enablement.
 The long-term goal is a local-first macOS agent with secure auto-replies, human
 approval, and randomized scheduling. Draft generation is preview-only; human ratings do not authorize sending.
 The scheduling MVP is available through explicit CLI commands; see
-[the scheduling runbook](docs/scheduling.md) for safe mock testing.
+[the scheduling runbook](docs/scheduling.md) for safe mock testing and the scoped
+live-test procedure. Phase 4 MVP validation: 296 offline tests pass; the owner
+reported one successful scheduled live delivery from macOS Terminal. Sleep/wake,
+live recurrence and launchd remain unvalidated.
 
 Phase 3A status: personalized general/contact profiles, conversation-aware retrieval,
 claim review, punctuation policy, human review and fixed-case blind comparison are

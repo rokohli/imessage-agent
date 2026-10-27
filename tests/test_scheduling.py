@@ -460,3 +460,17 @@ class SchedulingTests(unittest.TestCase):
             self.assertEqual(main(['schedule-create', '--state', str(state), '--date', '2099-10-27',
                                    '--time', '13:00', '--timezone', 'UTC']), 1)
         self.assertFalse(state.exists())
+
+    def test_worker_schedule_filter_preserves_other_due_schedules(self):
+        unrelated = self.create()
+        selected = self.create()
+        self.due(selected)
+        before = self.scheduler.history(unrelated)
+        self.assertEqual([r['plan_id'] for r in self.scheduler.tick(plan_id=selected)], [selected])
+        with patch('sys.stdout', io.StringIO()), patch('imessage_agent.schedule_cli.Scheduler', return_value=self.scheduler):
+            self.assertEqual(main(['scheduler-run', '--state', str(self.path), '--execute-mock', '--id', selected]), 0)
+        self.assertEqual(self.scheduler.history(selected)[0]['status'], 'accepted')
+        self.assertEqual(self.scheduler.history(unrelated), before)
+        self.assertEqual(self.scheduler.tick(dry_run=False, plan_id=selected), [])
+        with self.assertRaisesRegex(SchedulingError, 'schedule_not_found'):
+            self.scheduler.tick(dry_run=False, plan_id='nonexistent')

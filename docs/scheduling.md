@@ -6,12 +6,11 @@ No worker is installed or started automatically. AI replies remain disabled.
 
 ## Branch and publication
 
-`feat/phase4-smart-scheduling` is based on the Phase 3A commit. Its future PR
-initially targets `feat/phase3a-personalized-local-drafting`; after Phase 3A
-merges, retarget it to `main` and reconcile the base without force-pushing.
-GitHub publication was blocked during implementation by DNS/network failure.
-Phase 3A is committed locally; its push/PR and this dependent PR are pending.
-Neither PR is to be merged automatically.
+`feat/phase4-smart-scheduling` includes the merged Phase 3A infrastructure.
+[Phase 3A PR #2](https://github.com/rokohli/imessage-agent/pull/2) is merged;
+the Phase 4 PR targets `main` directly and has no open parent-PR dependency.
+Phase 4 is considered complete for this MVP, with the operational limits below.
+No automatic merge is requested for the Phase 4 PR.
 
 ## Safe local CLI walkthrough
 
@@ -150,10 +149,11 @@ verification before authorization. Only the explicit `scheduler-run
 account ID, refuses a changed saved selection, and revalidates account service,
 connection/enabled state, exact recipient identity/handle and account ownership
 in the existing AppleScript transport. Mock workers skip live plans and vice
-versa. No live creation or execution was performed during implementation.
+versa. Development tests use only mocked transport. The owner subsequently
+reported one successful scheduled live delivery from their own macOS Terminal.
 
-Validation: **293 offline tests pass** on Python 3.12.7 with network sockets
-blocked, including 37 scheduling tests. The documented immediate mock example
+Validation: **296 offline tests pass** on Python 3.12.7 with network sockets
+blocked, including 38 scheduling tests. The documented immediate mock example
 also passes with sockets and subprocess creation blocked.
 
 Each occurrence receives a unique ID and one persisted UTC execution timestamp.
@@ -214,8 +214,80 @@ most `--limit` due occurrences (default 100). Run additional ticks to catch up.
 Read-only dry-run shows only already materialized due rows; it does not extend
 recurrences, mark missed rows, migrate schemas, claim work or call transports.
 
-Remaining work: real macOS/account/delivery validation under separate permission;
+Remaining work: broader macOS/account/delivery validation under separate permission;
 launchd installation/wake behavior; optional FastAPI/dashboard; manual UNKNOWN
 reconciliation design. There is no launchd service, sleep prevention, automatic
 restart, cloud service or AI auto-reply integration in this MVP. Keep the worker
 running or arrange explicit future launchd setup for unattended operation.
+
+## Live one-message test, two minutes ahead
+
+Use your existing private outbound state database so all previous attempts and
+suppression records still apply. Do not use a new empty demo database for this
+test. Use new text that has never had an UNKNOWN attempt. Keep the Mac awake and
+Messages connected. Stop other scheduler workers for a controlled one-message
+test. A saved verified account selection is required; do not replace its file.
+
+Run in your own macOS Terminal, from the source workspace. This prompts for the
+existing state path, computes a UTC timestamp two minutes ahead, and opens the
+private recipient/text and exact authorization prompts. Finish confirmation and
+start the worker before the scheduled time. The grace period is 60 seconds.
+
+```sh
+cd /path/to/imessage-agent
+export PYTHONPATH="$PWD/src" PYTHONDONTWRITEBYTECODE=1
+PYTHON=/opt/anaconda3/bin/python
+printf 'Existing outbound SQLite state path: '
+IFS= read -r STATE
+if [ -f "$STATE" ]; then
+  read -r SCHEDULE_DATE SCHEDULE_TIME <<< "$("$PYTHON" -c 'from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)+timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"))')"
+  "$PYTHON" -m imessage_agent schedule-create --state "$STATE" \
+    --date "$SCHEDULE_DATE" --time "$SCHEDULE_TIME" --timezone UTC \
+    --transport live --grace 60
+else
+  printf 'Stop: specify the existing outbound database, not a new file.\n'
+fi
+```
+
+Enter the exact individual E.164 phone number or bare email address and NEW text
+at the hidden prompts. The CLI verifies account/recipient without sending, then
+shows the exact specification. Type `AUTHORIZE LIVE SCHEDULE` only if correct.
+The next command runs only the returned schedule ID, preserving all other plans:
+
+```sh
+printf 'Schedule ID returned above: '
+IFS= read -r SCHEDULE_ID
+"$PYTHON" -m imessage_agent scheduler-run --state "$STATE" \
+  --id "$SCHEDULE_ID" --execute-live --watch --interval 1
+```
+
+After the outcome prints, Ctrl-C stops polling. Inspect the durable result:
+
+```sh
+"$PYTHON" -m imessage_agent schedule-history --state "$STATE" --id "$SCHEDULE_ID"
+```
+
+ACCEPTED means Messages accepted the request, not verified delivery. Check the
+recipient device and Messages delivery status yourself. UNKNOWN is terminal:
+do not rerun the same message with a new schedule/database to bypass suppression.
+If it is MISSED, no attempt was made; authorize a new future schedule explicitly
+if you still want the test. To cancel before execution, use `schedule-cancel` on
+that ID. A previously reserved transport attempt may already be in flight.
+
+The schedule-ID worker filter is covered by an offline regression proving that
+another due schedule remains untouched.
+
+## Live validation evidence and limits
+
+On 2026-10-27, the owner reported that one message scheduled about two minutes
+ahead worked from their own macOS Terminal using the existing outbound state.
+This is owner-reported live validation, not independently observed recipient
+delivery evidence or a durable-state audit by the agent. No recipient, text,
+private database or raw execution output is included in this report. The agent
+session itself could not access Messages (AppleScript -1728 at application stage);
+the owner's Terminal verified the selected account and ran the live procedure.
+
+This does not validate sleeping/offline wake-up, live randomized windows, live
+recurrence, multiple accounts, launchd, or delivery reconciliation. Those remain
+separate from the synthetic regression coverage. ACCEPTED is not delivery proof;
+UNKNOWN remains terminal and must never be retried automatically.
