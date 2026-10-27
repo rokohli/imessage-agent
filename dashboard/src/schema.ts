@@ -6,7 +6,7 @@ export interface components {schemas: {
 "AttemptView": {"id": string; "display_name"?: string; "recipient": string; "status": string; "created_at": number};
 "ContactPreference": {"future_auto_reply"?: "disabled" | "ask_first"};
 "ContactView": {"recipient_key": string; "display_name": string; "address": string; "kind": string; "outbound_allowed": boolean; "handles": (string)[]; "profiles": (components['schemas']["Profile"])[]; "future_auto_reply": string};
-"ContactsRefresh": {"authorize"?: boolean; "country_code"?: string | null};
+"ContactsAccess": {"country_code"?: string | null};
 "Context": {"direction": string; "body": string | null; "occurred_at"?: number | null; "timestamp"?: string | null; "timezone"?: string | null; "session_start"?: boolean; "topic_boundary"?: boolean; "historical"?: boolean};
 "ConversationThresholds": {"gap_seconds"?: number; "day_gap_seconds"?: number; "burst_seconds"?: number};
 "DraftAction": {"revision": string};
@@ -16,8 +16,11 @@ export interface components {schemas: {
 "Health": {"messages": string; "account": string; "ollama": string; "scheduler": string; "worker"?: string; "auto_reply"?: false};
 "Occurrence": {"id": string; "plan_id": string; "local_date": string; "window_start": number; "window_end": number; "send_at": number; "deadline": number; "status": string; "detail": string; "claimed_at": number | null; "transport_status": string | null; "recipient": string; "display_name"?: string};
 "Profile": {"sample_count"?: number; "median_words"?: number; "lowercase_fraction"?: number; "emoji_fraction"?: number};
+"RecipientMatch": {"display_name": string; "recipient": string; "recipient_key": string};
+"RecipientMatches": {"status": string; "matches": (components['schemas']["RecipientMatch"])[]};
+"RecipientSearch": {"query": string};
 "Result": {"ok"?: boolean};
-"ScheduleInput": {"recipient": string; "body": string; "start_date": string; "start_time": string; "timezone": string; "end_time"?: string | null; "recurrence"?: "once" | "daily" | "weekly" | "weekdays"; "weekdays"?: (number)[]; "until"?: string | null; "fold"?: "reject" | "earlier" | "later"; "grace"?: number; "transport"?: "mock" | "live"; "account_id"?: string | null; "confirmed": true; "authorize_recipient"?: boolean};
+"ScheduleInput": {"recipient": string; "body": string; "start_date": string; "start_time": string; "timezone": string; "end_time"?: string | null; "recurrence"?: "once" | "daily" | "weekly" | "weekdays"; "weekdays"?: (number)[]; "until"?: string | null; "fold"?: "reject" | "earlier" | "later"; "grace"?: number; "transport"?: "mock" | "live"; "account_id"?: string | null; "confirmed": true; "authorize_recipient"?: boolean; "recipient_name"?: string | null};
 "ScheduleSpec": {"recipient": string; "body": string; "start_date": string; "start_time": string; "end_time": string; "window": boolean; "timezone": string; "recurrence": string; "weekdays": (number)[]; "until": string | null; "fold": string; "grace": number; "transport": string; "account_id": string | null};
 "ScheduleView": {"display_name"?: string; "id": string; "status": string; "spec": components['schemas']["ScheduleSpec"]; "replaces": string | null};
 "Settings": {"model"?: string; "timezone"?: string; "grace"?: number; "notifications"?: boolean};

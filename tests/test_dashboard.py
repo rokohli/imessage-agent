@@ -244,6 +244,35 @@ class DashboardTests(unittest.TestCase):
         self.assertTrue(view['context'][0]['historical'])
         self.assertEqual(view['reason'], 'ending_acknowledgment')
 
+    def test_recipient_search_is_explicit_and_has_no_import_or_authorization_effect(self):
+        result = dict(status='authorized', matches=[dict(display_name='Another Alice',
+            recipient='+12025550102', recipient_key='phone:+12025550102')])
+        with patch('imessage_agent.contacts.Contacts.search', return_value=result) as search:
+            self.assertEqual(self.client.post('/api/recipients/search', json={'query': 'Alice'}).status_code, 403)
+            search.assert_not_called()
+            self.assertEqual(self.write('/recipients/search', {'query': 'A'}).status_code, 422)
+            search.assert_not_called()
+            response = self.write('/recipients/search', {'query': 'Alice'})
+            self.assertEqual(response.json(), result)
+            search.assert_called_once_with('Alice')
+        self.assertIsNone(self.store.contact(Recipient.parse('+12025550102')))
+        self.assertEqual(self.store.connection.execute('SELECT COUNT(*) FROM approvals').fetchone()[0], 0)
+        self.assertEqual(self.write('/contacts/refresh').status_code, 404)
+
+    def test_only_confirmed_schedule_saves_chosen_name_and_canonical_recipient(self):
+        data = self.spec(recipient='+12025550102', recipient_name='Chosen Alice')
+        self.assertEqual(self.write('/schedules', data).status_code, 422)
+        self.assertIsNone(self.store.contact(Recipient.parse(data['recipient'])))
+        data['authorize_recipient'] = True
+        response = self.write('/schedules', data)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['spec']['recipient'], '+12025550102')
+        self.assertEqual(response.json()['display_name'], 'Chosen Alice')
+        self.assertTrue(self.store.contact(Recipient.parse(data['recipient'])).outbound_allowed)
+        self.assertEqual(self.write('/schedules', self.spec(recipient='Chosen Alice',
+            recipient_name='Chosen Alice')).status_code, 422)
+        self.assertEqual(self.store.connection.execute('SELECT COUNT(*) FROM send_attempts').fetchone()[0], 0)
+
     def test_conversation_thresholds_are_validated_and_never_enable_autoreplies(self):
         self.assertEqual(self.client.get('/api/conversation-thresholds').json()['burst_seconds'], 15)
         self.assertEqual(self.write('/conversation-thresholds', {'gap_seconds': 5000.0,

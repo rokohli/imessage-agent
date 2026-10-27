@@ -5,63 +5,79 @@ neither changes recipient allowlists, account selection, outbound limits, exact
 payload approvals, or UNKNOWN reservations. There is no new scheduler, transport,
 AI follow-up loop, cloud dependency, or Messages database writer.
 
-## Contacts
+## Recipient name lookup
 
-The separate native helper uses Apple's supported `CNContactStore` API. It fetches
-only contact identifiers, given/family/organization names, phone numbers and email
-addresses. It never opens the Contacts SQLite database or saves/modifies contacts.
-The app bundle has its own identity and `NSContactsUsageDescription`. Permission
-is requested only by an explicit **Request Contacts access** action; normal
-refreshes, dashboard reads and worker polls never request authorization.
+Type a saved name in **Schedule a message → Recipient**, click **Find contact**,
+and choose a specific number or email. Search results always show both the name
+and handle; duplicate names and multiple handles require an explicit choice.
+The review screen shows the chosen name and exact canonical destination before
+schedule authorization. Entering a number or email directly still works.
 
-Install once from this checkout, without starting the worker:
+This is an on-demand lookup, not an address-book import. It uses Apple's
+`CNContact.predicateForContacts(matchingName:)` to fetch only name matches, capped
+at ten contacts and forty handle choices. Only names, phone numbers and emails
+are requested. Searches require 2–100 characters; empty searches are rejected.
+No search results or queries are saved in agent state, style profiles or logs.
+The browser holds results only while choosing a recipient. The chosen name/handle
+are saved only when the operator confirms a valid schedule, alongside the
+recipient data the scheduler already needs. Choosing a match does not authorize
+outbound messages. Existing allowlist and exact-payload/account gates still apply.
+
+The native helper never exports the whole address book, opens Contacts SQLite,
+modifies contacts or sends contact data to a cloud service/model. Names displayed
+elsewhere in the dashboard and enabled notifications come from saved recipient
+labels; background workers do not query Contacts or refresh an address-book cache.
+When a saved name changes, search and select the recipient again to update it.
+
+Install the helper once, without starting a worker or requesting permission:
 
 ```sh
 PYTHONPATH=src .venv/bin/python -m imessage_agent contacts install
+```
+
+If an older helper is installed, explicitly rebuild it with:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m imessage_agent contacts install --replace
+```
+
+The new app is compiled and signed before replacing the old one; a failed build
+leaves the previous helper in place. Xcode command line tools are required.
+The app remains under `~/Library/Application Support/iMessage Agent/Contacts.app`.
+No installation, OS authorization or real Contacts search is performed by tests.
+
+Use **Settings → macOS Contacts → Request Contacts access**, or:
+
+```sh
 PYTHONPATH=src .venv/bin/python -m imessage_agent contacts authorize --state "$STATE"
 ```
 
-Installation compiles and ad-hoc signs `Contacts.app` under
-`~/Library/Application Support/iMessage Agent`. Xcode command line tools are
-required. The helper is launched locally with `open -W`; its result is written
-mode 0600 inside a private temporary directory and removed after reading.
-Supported API references: [accessing the contact store](https://developer.apple.com/documentation/contacts/accessing-the-contact-store)
-and [CNContactStore](https://developer.apple.com/documentation/contacts/cncontactstore).
+Authorization requests OS read permission but fetches no contacts. Only clicking
+Find contact performs a name query. Permission denial or a missing helper leaves
+direct number/email entry available. Revoke OS permission in macOS Privacy &
+Security > Contacts. Install/start/replacement and permission changes remain
+explicit operator actions; restart the dashboard to load updated code.
 
-Names and handles are cached in the existing private agent-state database, not
-in the outbound contacts/authorization table. The cache lasts one hour; a fresh
-resolver checks OS permission before using persisted names. Denial, restrictions,
-missing helper and read failures fall back to handles and invalidate cached names.
-Refresh after editing contacts or clear the cache from dashboard Settings:
+International `+` and `00` formats normalize spacing and punctuation. National
+numbers match only with an explicit country calling code, set in Settings when
+requesting access or via `contacts authorize --state "$STATE" --country-code 1`.
+Trunk prefixes and extensions are not inferred. Email domain case normalizes;
+local-part case stays exact. No suffix matching or contact-name send selector is
+introduced; all transports use the canonical handle the operator chose.
 
-```sh
-PYTHONPATH=src .venv/bin/python -m imessage_agent contacts refresh --state "$STATE"
-PYTHONPATH=src .venv/bin/python -m imessage_agent contacts invalidate --state "$STATE"
-```
+Opening agent state with this version deletes the superseded `contacts:cache`
+preference without reading its contents. The bulk export/refresh API and CLI are
+removed. This cleanup preserves recipient authorizations, approvals, schedules,
+attempts and UNKNOWN reservations. The only Contacts preference retained is the
+optional country calling code. The selected recipients and existing agent state
+remain private plaintext data; they are not an imported address book.
 
-International `+` and `00` phone formats normalize spacing and punctuation.
-National numbers match only with an explicit country calling code, e.g.
-`contacts refresh --state "$STATE" --country-code 1`. This is a conservative
-normalizer, not a global dial-plan parser: trunk prefixes and extensions are not
-inferred. Email domains normalize case; local-part case remains exact, consistent
-with canonical recipient identity. There is no last-seven/ten-digit matching.
+The native bridge uses private temporary files for a query and its matching
+results; those are removed when the request finishes. Contact names do not appear
+in process arguments or worker logs. Existing installed Notifier apps still need
+an explicit rebuild through the LaunchAgent runbook to support display labels.
 
-Multiple handles on one saved contact share a label. Shared handles across
-contacts are ambiguous and retain the original handle. Duplicate saved names
-include the selected handle in the display label. Names are never send selectors;
-all approvals and transports still bind the original canonical recipient.
-
-Labels appear in contacts, drafts, approvals, schedules, overview and activity.
-Enabled notifications can include the label; worker logs retain fixed categories
-and never include names/handles. Existing installed Notifier apps need rebuilding
-through the existing explicit LaunchAgent uninstall/install procedure to support
-labels. Preserve the existing state and selected transport flags; this change does
-not replace, restart or activate installed helpers automatically.
-
-Names/contacts do not enter model prompts. Cache/state and private evaluation
-files contain plaintext personal data; keep their parent directories private and
-out of cloud sync. Clearing the cache does not revoke OS permission; use macOS
-Privacy & Security > Contacts for that.
+Supported API: [name-matching predicate](https://developer.apple.com/documentation/contacts/cncontact/predicateforcontacts%28matchingname%3A%29).
 
 ## Conversation context
 

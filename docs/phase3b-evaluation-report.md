@@ -102,3 +102,21 @@ The English topic vocabulary and lexical retrieval can miss paraphrases; regiona
 phone trunk prefixes are not inferred. Existing installed workers/helpers were
 not replaced or activated. These limitations and the weak quality evidence keep
 autonomous replies disabled.
+
+## Recipient lookup scope correction
+
+The original Contacts cache implementation was replaced after the operator
+clarified that the goal is typing a recipient name, not importing an address book.
+The revised helper queries only names matching explicit searches; results are
+transient. Only the chosen name/handle is saved with a confirmed schedule. Opening
+state removes the legacy bulk cache without altering outbound authorizations.
+
+Follow-up validation: 378 synthetic Python tests and 23 dashboard tests passed;
+the production build, API type check and updated native Contacts build passed.
+Tests cover no-fetch authorization, no-cache searches, ambiguity, explicit handle
+selection, stale search responses, denied access, legacy-cache removal and
+preservation of canonical recipients/authorization gates. No real Contacts data
+was accessed or imported and no real messages were sent. The conversation-context
+study above remains unchanged; this follow-up does not change model prompts or
+session detection. Native permission presentation and live name queries still
+require operator verification.

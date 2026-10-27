@@ -35,6 +35,7 @@ class ScheduleInput(Input):
     account_id: str | None = None
     confirmed: Literal[True]
     authorize_recipient: bool = False
+    recipient_name: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class ScheduleSpec(BaseModel):
@@ -232,8 +233,7 @@ class WorkerHealth(BaseModel):
     transport: str | None
 
 
-class ContactsRefresh(Input):
-    authorize: bool = False
+class ContactsAccess(Input):
     country_code: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,2}$')
 
 
@@ -241,3 +241,18 @@ class ConversationThresholds(Input):
     gap_seconds: float = Field(default=14400, gt=0, le=604800)
     day_gap_seconds: float = Field(default=1800, gt=0, le=86400)
     burst_seconds: float = Field(default=15, gt=0, le=300)
+
+
+class RecipientSearch(Input):
+    query: str = Field(min_length=2, max_length=100)
+
+
+class RecipientMatch(BaseModel):
+    display_name: str
+    recipient: str
+    recipient_key: str
+
+
+class RecipientMatches(BaseModel):
+    status: str
+    matches: list[RecipientMatch]

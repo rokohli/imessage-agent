@@ -204,9 +204,13 @@ Ollama nor dashboard. Operational macOS/TCC/notification proof remains supervise
 
 The opt-in native Contacts helper uses `CNContactStore` with a purpose string and
 explicit authorization action; it never accesses Contacts SQLite or modifies
-contacts. Private agent-state preferences cache names/handles, without changing
-canonical recipient keys or outbound allowlists. Names never enter model prompts.
-Enabled native notifications may show names; worker logs contain fixed categories.
+contacts. Name searches use a matching-name predicate and return bounded choices;
+queries and results are not persisted. Only an explicitly selected recipient label
+is saved with a confirmed schedule, without changing canonical identifiers or
+bypassing outbound allowlist/approval gates. OS authorization itself fetches no
+contacts. The obsolete bulk cache is deleted when state opens; export/refresh paths
+are removed. Names never enter model prompts. Enabled native notifications may
+show saved recipient labels; worker logs contain fixed categories.
 
 Session classification and timestamped context cannot authorize sends. Ending,
 burst and stale-source checks only veto drafts. The existing worker can cancel

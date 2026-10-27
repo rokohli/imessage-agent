@@ -333,13 +333,13 @@ export function Contacts() {
     <>
       <div className="toolbar">
         <input
-          aria-label="Search contacts"
-          placeholder="Search names or handles…"
+          aria-label="Filter known recipients"
+          placeholder="Filter saved recipients…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <span className="muted">
-          Known agent contacts · no address book scan
+          Known recipients · no address-book import
         </span>
       </div>
       <LoadState {...state} retry={state.refresh} />
@@ -988,21 +988,15 @@ function ConversationPreferences() {
   };
   return <div className="two-col">
     <Card title="macOS Contacts">
-      <p>Saved names stay on this Mac. Install the Contacts helper using the runbook, then request access here.</p>
+      <p>Type a name in the schedule recipient field and click Find contact. Only the recipient you choose for a saved schedule is stored; your address book is not imported.</p>
       <label>Country calling code for national numbers (optional)
         <input aria-label="Contact country calling code" value={country} maxLength={3}
           onChange={e => setCountry(e.target.value)} inputMode="numeric" />
       </label>
       <div className="actions">
         <button disabled={busy} onClick={() => void perform(async () => {
-          const result = await api.refreshContacts(true, country || null); setStatus(result.status);
+          const result = await api.authorizeContacts(country || null); setStatus(result.status);
         })}>Request Contacts access</button>
-        <button disabled={busy} onClick={() => void perform(async () => {
-          const result = await api.refreshContacts(false, country || null); setStatus(result.status);
-        })}>Refresh contact names</button>
-        <button disabled={busy} onClick={() => void perform(async () => {
-          await api.clearContacts(); setStatus("Cache cleared");
-        })}>Clear contact cache</button>
       </div>
       <p role="status">{status}</p><ErrorText error={error} />
     </Card>

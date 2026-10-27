@@ -401,7 +401,7 @@ See [background installation, management and supervised validation](docs/backgro
 Nothing installs or activates automatically; live-message validation requires your
 explicit confirmation. The Mac must be awake with an appropriate Messages session.
 
-Phase 3B adds opt-in native Contacts display names and timestamped, session-aware
+Phase 3B adds on-demand recipient name lookup and timestamped, session-aware
 reply context with ending/burst/staleness suppression. Auto replies remain off.
 See [Contacts and conversation behavior](docs/phase3b-conversations.md) for setup,
 limitations, worker freshness checks and same-case local evaluation.

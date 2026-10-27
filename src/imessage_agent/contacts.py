@@ -6,11 +6,10 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 from .notifications import application_directory
 
 
-KEY = 'contacts:cache'
+KEY = 'contacts:settings'
 
 
 def normalize_handle(handle, country_code=None):
@@ -35,12 +34,12 @@ def helper_path():
     return application_directory() / 'Contacts.app'
 
 
-def install_helper():
+def install_helper(*, replace=False):
     if sys.platform != 'darwin':
         raise ValueError('macos_required')
     target = helper_path()
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if target.exists():
+    if target.exists() and not replace:
         raise ValueError('contacts_helper_already_installed')
     with tempfile.TemporaryDirectory(dir=target.parent) as directory:
         app = Path(directory) / 'Contacts.app'
@@ -51,22 +50,38 @@ def install_helper():
                        check=True, timeout=120, capture_output=True)
         (app / 'Contents/Info.plist').write_bytes(plistlib.dumps(dict(
             CFBundleIdentifier='io.github.rokohli.imessage-agent.contacts', CFBundleExecutable='Contacts',
-            CFBundleName='iMessage Agent Contacts', CFBundlePackageType='APPL', CFBundleVersion='1',
-            LSUIElement=True, NSContactsUsageDescription='Show saved contact names locally for iMessage conversations.')))
+            CFBundleName='iMessage Agent Contacts', CFBundlePackageType='APPL', CFBundleVersion='2',
+            LSUIElement=True, NSContactsUsageDescription='Look up recipient names locally when you search macOS Contacts.')))
         subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)],
                        check=True, timeout=30, capture_output=True)
-        app.rename(target)
+        previous = Path(directory) / 'PreviousContacts.app'
+        if target.exists():
+            target.rename(previous)
+        try:
+            app.rename(target)
+        except BaseException:
+            if previous.exists():
+                previous.rename(target)
+            raise
 
 
-def native_contacts(action='status'):
-    if action not in ('status', 'authorize', 'export'):
+def native_contacts(action='status', query=None):
+    if action not in ('status', 'authorize', 'search'):
         raise ValueError('invalid_contacts_action')
+    if action == 'search' and (not isinstance(query, str) or not 2 <= len(query.strip()) <= 100):
+        raise ValueError('contact_query_must_be_2_to_100_characters')
     if sys.platform != 'darwin' or not helper_path().is_dir():
         return dict(status='unavailable', contacts=[])
     try:
         with tempfile.TemporaryDirectory(prefix='imessage-contacts-') as directory:
             output = Path(directory) / 'result.json'
-            subprocess.run(['/usr/bin/open', '-W', '-n', str(helper_path()), '--args', action, str(output)],
+            args = ['/usr/bin/open', '-W', '-n', str(helper_path()), '--args', action, str(output)]
+            if action == 'search':
+                query_path = Path(directory) / 'query.json'
+                query_path.write_text(json.dumps(query.strip()))
+                query_path.chmod(0o600)
+                args.append(str(query_path))
+            subprocess.run(args,
                            check=True, timeout=90 if action == 'authorize' else 30,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             result = json.loads(output.read_text())
@@ -78,62 +93,56 @@ def native_contacts(action='status'):
 
 
 class Contacts:
-    def __init__(self, store, *, native=native_contacts, clock=time.time):
-        self.db, self.native, self.clock = store.connection, native, clock
-        self._cache = None
+    def __init__(self, store, *, native=native_contacts):
+        self.store, self.db, self.native = store, store.connection, native
 
-    def invalidate(self):
-        with self.db:
-            self.db.execute('DELETE FROM dashboard_preferences WHERE key=?', (KEY,))
-        self._cache = None
-
-    def refresh(self, *, authorize=False, country_code=None):
+    def authorize(self, *, country_code=None):
         if country_code is not None and not re.fullmatch(r'[1-9][0-9]{0,2}', country_code):
             raise ValueError('invalid_contact_country_code')
-        if authorize:
-            self.native('authorize')
-        result = self.native('export')
-        cache = dict(status=result['status'], refreshed_at=self.clock(), country_code=country_code,
-                     contacts=result.get('contacts', []) if result['status'] == 'authorized' else [])
+        result = self.native('authorize')
         with self.db:
             self.db.execute('INSERT INTO dashboard_preferences VALUES (?,?) ON CONFLICT(key) '
-                            'DO UPDATE SET value=excluded.value', (KEY, json.dumps(cache)))
-        self._cache = cache
-        return dict(status=cache['status'], auto_sending=False)
+                            'DO UPDATE SET value=excluded.value', (KEY, json.dumps(dict(country_code=country_code))))
+        return dict(status=result['status'], auto_sending=False)
 
-    def cache(self):
-        if self._cache and self.clock() - self._cache['refreshed_at'] >= 3600:
-            self._cache = None
-        if self._cache is None:
-            row = self.db.execute('SELECT value FROM dashboard_preferences WHERE key=?', (KEY,)).fetchone()
-            cache = json.loads(row[0]) if row else {}
-            # Check revocation even inside the TTL. Never serve stale names after denial/failure.
-            if cache and self.native('status')['status'] != 'authorized':
-                self.invalidate()
-                cache = {}
-            elif cache and self.clock() - cache['refreshed_at'] >= 3600:
-                self.refresh(country_code=cache.get('country_code'))
-                cache = self._cache
-            self._cache = cache
-        return self._cache
+    def search(self, query):
+        if not isinstance(query, str) or not 2 <= len(query.strip()) <= 100:
+            raise ValueError('contact_query_must_be_2_to_100_characters')
+        from .models import Recipient
+        row = self.db.execute('SELECT value FROM dashboard_preferences WHERE key=?', (KEY,)).fetchone()
+        country_code = json.loads(row[0]).get('country_code') if row else None
+        result = self.native('search', query.strip())
+        matches, seen = [], set()
+        if result['status'] == 'authorized':
+            for contact in result.get('contacts', [])[:10]:
+                for handle in contact['handles']:
+                    normalized = normalize_handle(handle, country_code)
+                    if not normalized:
+                        continue
+                    try:
+                        recipient = Recipient.parse(normalized)
+                    except ValueError:
+                        continue
+                    name = contact['name'].strip()[:200] or recipient.address
+                    if (name, recipient.key) not in seen:
+                        matches.append(dict(display_name=name, recipient=recipient.address,
+                                            recipient_key=recipient.key))
+                        seen.add((name, recipient.key))
+        # Search results are never written to state, profiles, or authorizations.
+        return dict(status=result['status'], matches=matches[:40])
 
     def resolve(self, handle):
-        cache = self.cache()
-        key = normalize_handle(handle, cache.get('country_code'))
-        matches = {c['id']: c for c in cache.get('contacts', []) if key and any(
-            normalize_handle(h, cache.get('country_code')) == key for h in c['handles'])}
-        if len(matches) != 1:
-            return dict(display_name=handle, handles=[handle], resolution='ambiguous' if matches else 'unresolved')
-        contact = next(iter(matches.values()))
-        name = contact['name'].strip()
-        duplicates = sum(c['name'].strip().casefold() == name.casefold() for c in cache['contacts']) > 1
-        return dict(display_name=(name + ' · ' + handle if duplicates else name) if name else handle,
-                    handles=contact['handles'], resolution='resolved')
+        from .models import Recipient
+        contact = self.store.contact(Recipient.parse(handle))
+        name = contact.display_name if contact else handle
+        return dict(display_name=name, handles=[handle],
+                    resolution='resolved' if name != handle else 'unresolved')
 
 
 def add_commands(commands):
     parser = commands.add_parser('contacts', help='Read-only native Contacts; no sending')
-    parser.add_argument('action', choices=('install', 'authorize', 'refresh', 'invalidate'))
+    parser.add_argument('action', choices=('install', 'authorize'))
+    parser.add_argument('--replace', action='store_true', help='Replace an older helper after successfully building the new one')
     parser.add_argument('--state', type=Path)
     parser.add_argument('--country-code', help='Explicit dialing prefix for national numbers, e.g. 1')
 
@@ -144,18 +153,14 @@ def run_command(args):
     store = None
     try:
         if args.action == 'install':
-            install_helper()
+            install_helper(replace=args.replace)
             result = dict(installed=True)
         else:
             if args.state is None:
                 raise ValueError('state_required')
             store = Store(_state_path(Path('/nonexistent-contacts-source'), args.state))
             contacts = Contacts(store)
-            if args.action == 'invalidate':
-                contacts.invalidate()
-                result = dict(invalidated=True)
-            else:
-                result = contacts.refresh(authorize=args.action == 'authorize', country_code=args.country_code)
+            result = contacts.authorize(country_code=args.country_code)
         print(json.dumps(result))
         return 0
     except (OSError, ValueError, subprocess.SubprocessError):

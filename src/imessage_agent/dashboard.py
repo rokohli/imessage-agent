@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .account_selection import AccountSelectionError, load_account_id, save_account_id
 from .applescript import diagnose_applescript, list_imessage_accounts
 from .dashboard_models import (AccountChoice, AccountView, ApprovalAction, AttemptView, ContactPreference,
-                               ContactView, ContactsRefresh, ConversationThresholds, DraftAction, DraftEdit, DraftView, Health, Occurrence,
+                               ContactView, ContactsAccess, RecipientSearch, RecipientMatches, ConversationThresholds, DraftAction, DraftEdit, DraftView, Health, Occurrence,
                                Result, ScheduleInput, ScheduleView, Settings, Summary, WorkerHealth)
 from .dashboard_service import DashboardError, DashboardService
 from .macos import MacOSMessagesReader, MessagesAccessError
@@ -129,16 +129,15 @@ def create_app(state: Path, *, database: Path | None = None):
         with service() as s:
             return s.occurrences()
 
-    @app.post('/api/contacts/refresh')
-    def refresh_contacts(data: ContactsRefresh):
+    @app.post('/api/contacts/authorize')
+    def authorize_contacts(data: ContactsAccess):
         with service() as s:
-            return s.names.refresh(authorize=data.authorize, country_code=data.country_code)
+            return s.names.authorize(country_code=data.country_code)
 
-    @app.delete('/api/contacts/cache', response_model=Result)
-    def invalidate_contacts():
+    @app.post('/api/recipients/search', response_model=RecipientMatches)
+    def search_recipients(data: RecipientSearch):
         with service() as s:
-            s.names.invalidate()
-            return Result()
+            return s.names.search(data.query)
 
     @app.get('/api/conversation-thresholds', response_model=ConversationThresholds)
     def conversation_thresholds():

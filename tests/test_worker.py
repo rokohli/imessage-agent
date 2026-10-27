@@ -263,7 +263,7 @@ class WorkerTests(unittest.TestCase):
         next_plan = self.scheduler.create(spec, authorized=True)
         entered, release = threading.Event(), threading.Event()
         presented = []
-        def slow_notify(event):
+        def slow_notify(event, display_name=None):
             presented.append(event)
             entered.set()
             release.wait(5)
@@ -300,7 +300,7 @@ class WorkerTests(unittest.TestCase):
         self.worker.poll(self.store)
         self.worker.presentation.result(timeout=2)
         self.worker.poll(self.store)
-        self.notify.assert_called_once_with('accepted')
+        self.notify.assert_called_once_with('accepted', 'Synthetic')
         self.assertNotIn(self.recipient.address, self.output.getvalue())
         self.assertNotIn('SECRET', self.output.getvalue())
         log = json.loads(self.output.getvalue().splitlines()[0])

@@ -16,8 +16,8 @@ vi.mock("./api", () => ({
   api: {
     thresholds: vi.fn(),
     saveThresholds: vi.fn(),
-    refreshContacts: vi.fn(),
-    clearContacts: vi.fn(),
+    authorizeContacts: vi.fn(),
+    searchRecipients: vi.fn(),
     worker: vi.fn(),
     summary: vi.fn(),
     health: vi.fn(),
@@ -107,7 +107,7 @@ describe("schedule validation", () => {
         saved={vi.fn()}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Exact iMessage handle"), {
+    fireEvent.change(screen.getByLabelText("Recipient"), {
       target: { value: valid.recipient },
     });
     fireEvent.change(screen.getByLabelText("Message"), {
@@ -261,7 +261,7 @@ it("contacts search displays canonical identities", async () => {
   render(<Contacts />);
   await screen.findByText("Synthetic Person");
   expect(screen.getByText(draft.recipient_key)).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Search contacts"), {
+  fireEvent.change(screen.getByLabelText("Filter known recipients"), {
     target: { value: "Absent" },
   });
   expect(screen.queryByText("Synthetic Person")).not.toBeInTheDocument();
@@ -423,14 +423,61 @@ it("shows contact labels, session boundaries and timestamps while retaining the 
   expect(screen.getByText("2026-10-27T18:00:00-05:00")).toBeInTheDocument();
 });
 
-it("requests Contacts permission only on an explicit click and clears the cache", async () => {
-  vi.mocked(api.refreshContacts).mockResolvedValue({status: "denied"});
-  vi.mocked(api.clearContacts).mockResolvedValue({});
+it("requests Contacts permission only on an explicit click without importing contacts", async () => {
+  vi.mocked(api.authorizeContacts).mockResolvedValue({status: "denied"});
   render(<SettingsPage />);
-  expect(api.refreshContacts).not.toHaveBeenCalled();
+  expect(api.authorizeContacts).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole("button", {name: "Request Contacts access"}));
-  await waitFor(() => expect(api.refreshContacts).toHaveBeenCalledWith(true, null));
+  await waitFor(() => expect(api.authorizeContacts).toHaveBeenCalledWith(null));
   expect(await screen.findByText("denied")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", {name: "Clear contact cache"}));
-  await waitFor(() => expect(api.clearContacts).toHaveBeenCalledOnce());
+  expect(screen.queryByRole("button", {name: "Refresh contact names"})).not.toBeInTheDocument();
+  expect(api.searchRecipients).not.toHaveBeenCalled();
+});
+
+
+it("looks up a typed name only on request and requires choosing an exact handle", async () => {
+  vi.mocked(api.searchRecipients).mockResolvedValue({status: "authorized", matches: [
+    {display_name: "Alex", recipient: "+12025550101", recipient_key: "phone:+12025550101"},
+    {display_name: "Alex", recipient: "alex@example.com", recipient_key: "email:alex@example.com"},
+  ]});
+  render(<ScheduleForm settings={settings} account={null} close={vi.fn()} saved={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Recipient"), {target: {value: "Alex"}});
+  expect(api.searchRecipients).not.toHaveBeenCalled();
+  expect(validateSchedule({recipient: "Alex", body: "hello", start_date: "2099-10-27", start_time: "13:00", timezone: "UTC", confirmed: true})).toMatch(/Select a matching contact/);
+  fireEvent.click(screen.getByRole("button", {name: "Find contact"}));
+  fireEvent.click(await screen.findByRole("button", {name: "Alex · alex@example.com"}));
+  expect(screen.getByText("Selected: Alex · alex@example.com")).toBeInTheDocument();
+  expect(api.saveSchedule).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Message"), {target: {value: "hello"}});
+  fireEvent.change(screen.getByLabelText("Start date"), {target: {value: "2099-10-27"}});
+  fireEvent.change(screen.getByLabelText("Exact time / window start"), {target: {value: "13:00"}});
+  fireEvent.click(screen.getByRole("button", {name: "Review schedule"}));
+  expect(screen.getByRole("heading", {name: "Alex"})).toBeInTheDocument();
+  expect(screen.getByText("alex@example.com")).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("I authorize this exact recipient, message and schedule."));
+  fireEvent.click(screen.getByRole("button", {name: "Authorize schedule"}));
+  await waitFor(() => expect(api.saveSchedule).toHaveBeenCalledWith(expect.objectContaining({recipient: "alex@example.com", recipient_name: "Alex"}), undefined));
+});
+
+it("discards outdated name results after the recipient field changes", async () => {
+  let finish!: (value: Awaited<ReturnType<typeof api.searchRecipients>>) => void;
+  vi.mocked(api.searchRecipients).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  render(<ScheduleForm settings={settings} account={null} close={vi.fn()} saved={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Recipient"), {target: {value: "Alice"}});
+  fireEvent.click(screen.getByRole("button", {name: "Find contact"}));
+  fireEvent.change(screen.getByLabelText("Recipient"), {target: {value: "Bob"}});
+  await act(async () => finish({status: "authorized", matches: [{display_name: "Alice", recipient: "+12025550101", recipient_key: "phone:+12025550101"}]}));
+  expect(screen.queryByRole("button", {name: "Alice · +12025550101"})).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Recipient")).toHaveValue("Bob");
+});
+
+it("leaves direct handle entry available when name lookup is denied", async () => {
+  vi.mocked(api.searchRecipients).mockResolvedValue({status: "denied", matches: []});
+  render(<ScheduleForm settings={settings} account={null} close={vi.fn()} saved={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Recipient"), {target: {value: "Alice"}});
+  fireEvent.click(screen.getByRole("button", {name: "Find contact"}));
+  expect(await screen.findByText(/Name lookup unavailable/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Recipient"), {target: {value: "+12025550101"}});
+  expect(screen.getByLabelText("Recipient")).toHaveValue("+12025550101");
+  expect(api.saveSchedule).not.toHaveBeenCalled();
 });

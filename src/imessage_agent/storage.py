@@ -207,6 +207,8 @@ class Store:
                     for statement in migration.split(';'):
                         if statement.strip():
                             self.connection.execute(statement)
+                # Discard the superseded bulk address-book cache without reading it.
+                self.connection.execute("DELETE FROM dashboard_preferences WHERE key='contacts:cache'")
         except BaseException:
             self.connection.close()
             raise

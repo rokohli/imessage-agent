@@ -50,6 +50,10 @@ class DashboardService:
                          account_id=data.account_id)
         plan = self.scheduler.create(spec, authorized=data.confirmed, replaces=replaces,
                                      authorize_recipient=data.authorize_recipient)
+        if data.recipient_name:
+            with self.db:
+                self.db.execute('UPDATE contacts SET display_name=? WHERE recipient_key=?',
+                                (data.recipient_name, Recipient.parse(data.recipient).key))
         return self.schedule_view(plan)
 
     def schedule_view(self, plan_id):
