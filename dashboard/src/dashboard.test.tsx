@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type Draft, type ScheduleInput } from "./api";
 import {
@@ -14,6 +14,7 @@ import { ScheduleForm, validateSchedule } from "./ScheduleForm";
 import { App } from "./main";
 vi.mock("./api", () => ({
   api: {
+    worker: vi.fn(),
     summary: vi.fn(),
     health: vi.fn(),
     schedules: vi.fn(),
@@ -54,6 +55,7 @@ const settings = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(api.worker).mockResolvedValue({status: "stopped", heartbeat: null, last_poll: null, pending_count: 0, next_execution: null, recent_errors: [], last_outcome: null, transport: null});
   vi.mocked(api.settings).mockResolvedValue(settings);
   vi.mocked(api.accounts).mockResolvedValue({
     selected: null,
@@ -292,4 +294,46 @@ it("sidebar routes render and appearance toggles", async () => {
   expect(
     screen.getByRole("button", { name: "☀ Light appearance" }),
   ).toBeInTheDocument();
+});
+
+
+it("shows stale worker attention, heartbeat, next execution and sanitized errors", async () => {
+  vi.mocked(api.worker).mockResolvedValue({status: "attention", heartbeat: 1, last_poll: 1, pending_count: 2, next_execution: 100, recent_errors: [{timestamp: 2, category: "sqlite_unavailable"}], last_outcome: "unknown", transport: "mock"});
+  const { WorkerPanel } = await import("./pages");
+  render(<WorkerPanel />);
+  expect(await screen.findByText("attention")).toBeInTheDocument();
+  expect(screen.getByText(/Last heartbeat:/)).toBeInTheDocument();
+  expect(screen.getByText(/Next execution:/)).toBeInTheDocument();
+  expect(screen.getByText(/sqlite unavailable/)).toBeInTheDocument();
+  expect(screen.getByText(/Last outcome: unknown/)).toBeInTheDocument();
+});
+
+
+it("hides previous worker health on failed or pending refresh and restores fresh status", async () => {
+  vi.useFakeTimers();
+  try {
+    const health = {
+      status: "running", heartbeat: 1, last_poll: 1, pending_count: 0,
+      next_execution: null, recent_errors: [], last_outcome: null, transport: "mock",
+    };
+    vi.mocked(api.worker).mockResolvedValue(health);
+    const { WorkerPanel } = await import("./pages");
+    let unmount = () => {};
+    await act(async () => { unmount = render(<WorkerPanel />).unmount; });
+    expect(screen.getByText("running")).toBeInTheDocument();
+    vi.mocked(api.worker).mockRejectedValueOnce(new Error("Local status unavailable"));
+    await act(async () => { vi.advanceTimersByTime(10000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Local status unavailable");
+    expect(screen.queryByText("running")).not.toBeInTheDocument();
+    let finish!: (value: Awaited<ReturnType<typeof api.worker>>) => void;
+    vi.mocked(api.worker).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    fireEvent.click(screen.getByRole("button", {name: "Try again"}));
+    expect(screen.queryByText("running")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading local data…")).toBeInTheDocument();
+    await act(async () => { finish({...health, status: "stopped"}); });
+    expect(screen.getByText("stopped")).toBeInTheDocument();
+    unmount();
+  } finally {
+    vi.useRealTimers();
+  }
 });

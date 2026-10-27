@@ -14,13 +14,14 @@ from .account_selection import AccountSelectionError, load_account_id, save_acco
 from .applescript import diagnose_applescript, list_imessage_accounts
 from .dashboard_models import (AccountChoice, AccountView, ApprovalAction, AttemptView, ContactPreference,
                                ContactView, DraftAction, DraftEdit, DraftView, Health, Occurrence,
-                               Result, ScheduleInput, ScheduleView, Settings, Summary)
+                               Result, ScheduleInput, ScheduleView, Settings, Summary, WorkerHealth)
 from .dashboard_service import DashboardError, DashboardService
 from .macos import MacOSMessagesReader, MessagesAccessError
 from .ollama import DraftError, ModelConfig, Ollama
 from .scheduling import SchedulingError
 from .smoke import _state_path
 from .storage import Store
+from .worker import worker_status
 
 ORIGINS = ('http://127.0.0.1:5173', 'http://127.0.0.1:8000')
 
@@ -88,7 +89,7 @@ def create_app(state: Path, *, database: Path | None = None):
             return dict(upcoming_count=len(upcoming), upcoming=sorted(upcoming, key=lambda o: o['send_at'])[:6],
                         pending_approvals=sum(d['status'] == 'pending' for d in drafts),
                         saved_drafts=sum(d['status'] != 'discarded' for d in drafts),
-                        recent_attempts=s.attempts()[:6], scheduler='ready_manual_worker_required')
+                        recent_attempts=s.attempts()[:6], scheduler='authorized_schedules_ready')
 
     @app.get('/api/schedules', response_model=list[ScheduleView])
     def schedules():
@@ -212,6 +213,11 @@ def create_app(state: Path, *, database: Path | None = None):
         save_account_id(chosen, replace=True)
         return Result()
 
+    @app.get('/api/worker', response_model=WorkerHealth)
+    def worker():
+        with service() as s:
+            return worker_status(s.store, state)
+
     @app.get('/api/health', response_model=Health)
     def health():
         messages = 'not_configured'
@@ -228,13 +234,15 @@ def create_app(state: Path, *, database: Path | None = None):
         except AccountSelectionError:
             account = 'not_configured'
         with service() as s:
-            scheduler = 'ready_manual_worker_required' if account == 'valid' else 'mock_ready_live_account_required'
+            scheduler = 'ready' if account == 'valid' else 'mock_ready_live_account_required'
             try:
                 Ollama(ModelConfig(model=s.settings().model)).health()
                 ollama = 'ready'
             except DraftError:
                 ollama = 'unavailable'
-        return Health(messages=messages, account=account, ollama=ollama, scheduler=scheduler)
+        with service() as s:
+            background = worker_status(s.store, state)['status']
+        return Health(messages=messages, account=account, ollama=ollama, scheduler=scheduler, worker=background)
 
     dist = Path(__file__).resolve().parents[2] / 'dashboard' / 'dist'
     if dist.is_dir():

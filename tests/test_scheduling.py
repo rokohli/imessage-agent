@@ -323,7 +323,7 @@ class SchedulingTests(unittest.TestCase):
             db.execute('INSERT INTO outbound_claims VALUES (?,?,NULL,NULL)', ('prior', 'synthetic-hash'))
         old = Store(oldpath)
         try:
-            self.assertEqual(old.connection.execute('PRAGMA user_version').fetchone()[0], 5)
+            self.assertEqual(old.connection.execute('PRAGMA user_version').fetchone()[0], 6)
             self.assertEqual(old.attempt('prior').outcome.status, SendStatus.UNKNOWN)
             self.assertEqual(old.approval('prior').consumed_by, 'prior')
             self.assertEqual(old.connection.execute('SELECT COUNT(*) FROM outbound_claims').fetchone()[0], 1)
@@ -422,7 +422,7 @@ class SchedulingTests(unittest.TestCase):
             finally:
                 store.close()
         with ThreadPoolExecutor(max_workers=2) as pool:
-            self.assertEqual(list(pool.map(upgrade, range(2))), [5, 5])
+            self.assertEqual(list(pool.map(upgrade, range(2))), [6, 6])
 
     def test_cli_list_show_history_edit_cancel_and_mock_execution(self):
         plan = self.create()

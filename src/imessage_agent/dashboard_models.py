@@ -203,3 +203,19 @@ class Summary(BaseModel):
 
 class Result(BaseModel):
     ok: bool = True
+
+
+class WorkerError(BaseModel):
+    timestamp: float
+    category: str
+
+
+class WorkerHealth(BaseModel):
+    status: str
+    heartbeat: float | None
+    last_poll: float | None
+    pending_count: int
+    next_execution: float | None
+    recent_errors: list[WorkerError]
+    last_outcome: str | None
+    transport: str | None

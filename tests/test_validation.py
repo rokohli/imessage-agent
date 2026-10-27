@@ -6,6 +6,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,7 +68,7 @@ class ClassificationTests(unittest.TestCase):
 
     def test_explicit_fictional_attestation_required(self):
         output = io.StringIO()
-        with contextlib.redirect_stderr(output), self.assertRaises(SystemExit) as error:
+        with warnings.catch_warnings(record=True), contextlib.redirect_stderr(output), self.assertRaises(SystemExit) as error:
             main(["validate-classification", "--database", str(self.database), "--selection", str(self.selection)])
         self.assertEqual(error.exception.code, 2)
         self.assertEqual(json.loads(output.getvalue()), {"error": "invalid_arguments"})
