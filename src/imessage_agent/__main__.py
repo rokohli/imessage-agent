@@ -86,7 +86,13 @@ def main(argv=None) -> int:
     supervised.add_argument("--state", type=Path, required=True, help="Existing outbound state containing the prior UNKNOWN")
     add_commands(commands)
     schedule_cli.add_commands(commands)
+    dashboard = commands.add_parser('dashboard', help='Loopback-only local web dashboard; never starts a worker')
+    dashboard.add_argument('--state', type=Path, default=Path.home() / '.local/state/imessage-agent/state.sqlite3')
+    dashboard.add_argument('--database', type=Path, help='Explicit read-only Messages source for diagnostics/regeneration')
     args = parser.parse_args(argv)
+    if args.command == 'dashboard':
+        from .dashboard import run_dashboard
+        return run_dashboard(args)
     if args.command in schedule_cli.COMMANDS:
         return schedule_cli.run_command(args)
     if args.command in COMMANDS:

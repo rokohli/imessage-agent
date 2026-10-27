@@ -371,3 +371,22 @@ and saves style/relevance/naturalness ratings plus invention labels in a separat
 local review file. It reports human quality independently of heuristic scores and
 content-acceptance rates. Resume uses saved snapshots without regenerating drafts.
 Ratings never grant sending approval or turn on autonomous replies.
+
+## Phase 5 local dashboard
+
+A React/TypeScript desktop dashboard and loopback FastAPI API now manage local
+schedules, contacts, saved drafts, approvals, activity and settings. Schedule
+confirmation reuses Phase 4 authorization; draft approval remains payload-bound.
+The dashboard starts no worker and sends no messages. Auto replies remain disabled.
+
+See [the dashboard runbook](docs/local-dashboard.md) for installation, state
+configuration, source access opt-in, tests and remaining Phase 6 work.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dashboard,test]'
+PYTHONPATH=src .venv/bin/python -m imessage_agent dashboard
+# In another terminal:
+cd dashboard && npm install && npm run dev
+# Open http://127.0.0.1:5173
+```

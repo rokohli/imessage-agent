@@ -241,7 +241,7 @@ class MetadataQualityTests(unittest.TestCase):
                 saved = store.messages(reader.source_id)[-1]
                 self.assertEqual(saved['direction'], 'outbound')
                 self.assertEqual(saved['body'], 'opaque payload')
-                self.assertEqual(store.connection.execute('PRAGMA user_version').fetchone()[0], 4)
+                self.assertEqual(store.connection.execute('PRAGMA user_version').fetchone()[0], 5)
             finally:
                 store.close()
 

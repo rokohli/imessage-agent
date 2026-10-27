@@ -142,6 +142,15 @@ PRAGMA user_version = 4;
 """
 
 
+_DASHBOARD_SCHEMA = """
+CREATE TABLE dashboard_preferences (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+PRAGMA user_version = 5;
+"""
+
+
 def _identifier(value: str) -> None:
     if not isinstance(value, str) or not value.strip() or len(value) > 128:
         raise ValueError("identifiers must contain 1 to 128 characters")
@@ -178,13 +187,13 @@ class Store:
             with self.connection:
                 self.connection.execute("BEGIN IMMEDIATE")
                 version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-                if version not in (0, 1, 2, 3, 4):
+                if version not in (0, 1, 2, 3, 4, 5):
                     raise ValueError("unsupported agent schema version")
                 if version == 0 and self.connection.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchone():
                     raise ValueError("refusing an unrecognized database")
-                migrations = (_SCHEMA, _OUTBOUND_SCHEMA, _DRAFT_SCHEMA, _SCHEDULER_SCHEMA)
+                migrations = (_SCHEMA, _OUTBOUND_SCHEMA, _DRAFT_SCHEMA, _SCHEDULER_SCHEMA, _DASHBOARD_SCHEMA)
                 for migration in migrations[version:]:
                     for statement in migration.split(';'):
                         if statement.strip():
