@@ -32,12 +32,15 @@ class Outbound:
         body: str,
         approval_id: str | None = None,
         *, reply_to: tuple[str, str] | None = None,
+        schedule_occurrence: str | None = None,
     ) -> SendAttempt:
         controlled = type(self.adapter) is AppleScriptMessagesAdapter
         if controlled and not self.adapter.enabled:
             raise ValueError("transport_disabled")
         attempt, claimed = self.store.claim_send(
-            attempt_id, recipient, body, approval_id, self.clock(), controlled=controlled, reply_to=reply_to
+            attempt_id, recipient, body, approval_id, self.clock(), controlled=controlled, reply_to=reply_to,
+            schedule_occurrence=schedule_occurrence,
+            schedule_account_id=self.adapter.account_id if controlled else None,
         )
         if not claimed:
             return attempt

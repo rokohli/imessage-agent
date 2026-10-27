@@ -279,7 +279,7 @@ class DraftingTests(unittest.TestCase):
                 store = Store(path)
                 try:
                     self.assertEqual(store.cursor('synthetic').sequence, 42)
-                    self.assertEqual(store.connection.execute('PRAGMA user_version').fetchone()[0], 3)
+                    self.assertEqual(store.connection.execute('PRAGMA user_version').fetchone()[0], 4)
                     self.assertEqual(store.connection.execute('SELECT count(*) FROM reply_drafts').fetchone()[0], 0)
                 finally:
                     store.close()
