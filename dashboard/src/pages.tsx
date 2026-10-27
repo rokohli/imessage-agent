@@ -161,7 +161,7 @@ export function Overview() {
 
 export function Schedules() {
   const state = useData(async () => ({
-    plans: await api.schedules(),
+    plans: (await api.schedules()).filter((p) => p.status !== "cancelled"),
     occurrences: await api.occurrences(),
     settings: await api.settings(),
     account: await api
