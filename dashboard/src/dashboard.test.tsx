@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { api, type Draft, type ScheduleInput } from "./api";
+import { api, type Draft, type Schedule, type Occurrence, type ScheduleInput } from "./api";
 import {
   Activity,
   Contacts,
@@ -270,6 +270,73 @@ it("schedule page has a useful empty state", async () => {
       "No schedules yet. Your first message starts here.",
     ),
   ).toBeInTheDocument();
+});
+it("hides cancelled schedules after loading and cancellation while retaining activity", async () => {
+  const plan: Schedule = {
+    id: "active-plan",
+    status: "active",
+    replaces: null,
+    spec: {
+      recipient: draft.recipient,
+      body: "Synthetic scheduled message",
+      start_date: "2099-01-01",
+      start_time: "13:00",
+      end_time: "13:00",
+      window: false,
+      timezone: "UTC",
+      recurrence: "once",
+      weekdays: [],
+      until: null,
+      fold: "reject",
+      grace: 300,
+      transport: "mock",
+      account_id: null,
+    },
+  };
+  const occurrence: Occurrence = {
+    id: "execution",
+    plan_id: plan.id,
+    recipient: plan.spec.recipient,
+    local_date: "2099-01-01",
+    window_start: 1,
+    window_end: 1,
+    send_at: 1,
+    deadline: 301,
+    status: "pending",
+    detail: "",
+    claimed_at: null,
+    transport_status: null,
+  };
+  const cancelled = {
+    ...plan,
+    id: "cancelled-plan",
+    status: "cancelled",
+    spec: { ...plan.spec, body: "Previously cancelled message" },
+  };
+  vi.mocked(api.schedules)
+    .mockResolvedValueOnce([plan, cancelled])
+    .mockResolvedValue([{ ...plan, status: "cancelled" }, cancelled]);
+  vi.mocked(api.occurrences)
+    .mockResolvedValueOnce([occurrence])
+    .mockResolvedValue([{ ...occurrence, status: "cancelled" }]);
+  vi.mocked(api.cancel).mockResolvedValue({ ok: true });
+  vi.mocked(api.attempts).mockResolvedValue([]);
+  const schedules = render(<Schedules />);
+  await screen.findByText(plan.spec.body);
+  expect(screen.queryByText(cancelled.spec.body)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel schedule" }));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel schedule" }));
+  await screen.findByText("No schedules yet. Your first message starts here.");
+  expect(api.cancel).toHaveBeenCalledWith(plan.id);
+  expect(screen.queryByText(plan.spec.body)).not.toBeInTheDocument();
+  schedules.unmount();
+  render(<Activity />);
+  expect(await screen.findByText(plan.spec.recipient)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Outcome"), {
+    target: { value: "cancelled" },
+  });
+  expect(screen.getByText(plan.spec.recipient)).toBeInTheDocument();
+  expect(screen.getByText("Scheduled execution")).toBeInTheDocument();
 });
 it("settings keeps automatic replies disabled", async () => {
   render(<SettingsPage />);
