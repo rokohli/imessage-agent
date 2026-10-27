@@ -5,6 +5,9 @@ import random
 import time
 import uuid
 from dataclasses import replace
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from .sessions import SessionConfig
 
 from .drafting import generate, history, prepare_context, safe_text, usable
 from .evaluation import case_history, compare
@@ -70,6 +73,16 @@ def _frozen_cases(reader, source, maximum):
     return metadata, chats, frozen, sampling
 
 
+def review_evidence(rows, incoming):
+    """Common review-only chronology; never changes either variant's model context."""
+    zone = ZoneInfo(SessionConfig().timezone)
+    preceding = [m for m in rows if m.chat_id == incoming.chat_id
+                 and m.sequence < incoming.sequence and m.occurred_at <= incoming.occurred_at][-100:]
+    return [dict(direction=m.direction.value, body=m.body if safe_text(m.body) else '[content excluded]',
+                 occurred_at=m.occurred_at, timestamp=datetime.fromtimestamp(m.occurred_at, zone).isoformat(),
+                 timezone=str(zone), review_only=True) for m in preceding + [incoming]]
+
+
 def run_comparison(args):
     source_path = _state_path(args.database, args.source_review)
     output = _state_path(args.database, args.comparison)
@@ -132,8 +145,8 @@ def run_comparison(args):
                     'variant': label, 'source_case': case['source_case'],
                     'source_guid': incoming.guid, 'held_out_guid': actual.guid,
                     'source_sequence': incoming.sequence, 'actual_sequence': actual.sequence,
-                    'context': (sorted(draft.get('historical_context', []) + draft.get('context', []),
-                                       key=lambda m: m.get('occurred_at', 0)) if session_study and draft else case['context']), 'draft': draft, 'actual_reply': actual.body,
+                    'context': review_evidence(case['preceding'], incoming) if session_study else case['context'],
+                    'draft': draft, 'actual_reply': actual.body,
                     'generation_error': error, 'latency_ms': elapsed,
                     'heuristic_scores': compare(draft['reply'] if draft and draft['validation_status'] == 'accepted'
                                                 else '', actual.body),

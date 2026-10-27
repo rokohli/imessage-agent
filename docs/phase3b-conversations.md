@@ -171,6 +171,11 @@ The comparison is a new private mode-0600 SQLite file; source reviews, live stat
 profiles and outbound authorizations are not changed. Model locality is checked
 before any private content is submitted. Resume requires no model or Messages read.
 
+New session comparisons save one shared, timestamped same-chat evidence window
+for human reviewers, independently of the variants' different model contexts.
+Older saved comparison files retain their original evidence; prepare a new file
+before using session/topic correctness ratings from those older snapshots.
+
 Human review records relevance, naturalness and invented facts separately from
 style, plus nullable session-boundary correctness, topic-switch correctness and
 unnecessary replies. A null label means insufficient evidence, not a success.

@@ -204,7 +204,8 @@ def _show_case(ordinal, snapshot, *, blind=False, session_study=False):
     print(f'\nCase {ordinal} (private text; no sending)')
     for row in snapshot['context']:
         speaker = 'You' if row['direction'] == 'outbound' else 'Contact'
-        print(f'{row.get("timestamp", "")} {"Historical" if row.get("historical") else "Current"} {speaker}: {_terminal_text(row["body"])}')
+        scope = 'Evidence' if row.get('review_only') else 'Historical' if row.get('historical') else 'Current'
+        print(f'{row.get("timestamp", "")} {scope} {speaker}: {_terminal_text(row["body"])}')
     draft = snapshot['draft']
     if session_study:
         print('Predicted conversation state: ' + draft.get('conversation_state', 'UNCERTAIN'))

@@ -49,6 +49,11 @@ class ComparisonTests(unittest.TestCase):
         metadata, snapshots = self.snapshots()
         self.assertTrue(metadata['session_study'])
         self.assertEqual(metadata['variants']['A']['pipeline'], 'legacy_context')
+        for number in range(1, 21):
+            left, right = [s for s in snapshots if s['source_case'] == number]
+            self.assertEqual(left['context'], right['context'])
+            self.assertTrue(all(row['timestamp'] and row['review_only'] for row in left['context']))
+            self.assertNotIn(left['actual_reply'], json.dumps(left['context']))
         store = ReviewStore(self.output_path, resume=True)
         try:
             for row in store.cases():

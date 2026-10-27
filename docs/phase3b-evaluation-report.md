@@ -120,3 +120,9 @@ was accessed or imported and no real messages were sent. The conversation-contex
 study above remains unchanged; this follow-up does not change model prompts or
 session detection. Native permission presentation and live name queries still
 require operator verification.
+
+The human-review preparation was also corrected to show both variants the same
+timestamped evidence window, separately from their model contexts. The existing
+private snapshots above were not rewritten; regenerate a comparison into a new
+file before human session/topic accuracy review. Local judge results already used
+the same timestamped source evidence for both variants and remain as reported.
