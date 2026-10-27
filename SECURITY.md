@@ -2,26 +2,39 @@
 
 ## Current scope
 
-Version 0.1.0 is an offline, mock-only foundation. There is no live Messages or
-Contacts reader, AppleScript transport, AI client, background worker, or
-randomized scheduler. The adapter factory rejects live mode, and the outbound
-gate accepts only the concrete mock adapter. No macOS permission is required.
-Future live integration needs a separate security review; these controls are not
-evidence that autonomous replies are safe to deploy.
+The foundation has explicit-path read-only ingestion and a disabled-by-default
+text-only AppleScript adapter. Phase 3A adds a local-only Ollama draft client,
+with no automatic sending or background worker. The only sending CLI is the interactive supervised test,
+which requires existing UNKNOWN history, NEW text and explicit one-shot confirmation. The factory remains mock-only. Only trusted
+local code may explicitly enable the real adapter through `Outbound`; neither
+environment variables nor development mode enable it. No real sends or permission
+changes were executed during implementation. Offline subprocesses are mocked.
 
 ## Trust model
 
-Incoming message content must be treated as untrusted data. Contact administration
-and approval creation are trusted local operations, not AI tools. Each mock
-dispatch requires an exact allowlisted recipient and an unused, unexpired approval
-bound to the recipient and body. Approval consumption and attempt reservation are
-atomic. Unknown outcomes are retained without automatic retry; the system cannot
-guarantee exactly-once delivery for a future transport.
+Incoming content is untrusted. Store administration, exact-payload approval and
+recipient opt-in must stay in a trusted local control plane, never AI tools.
+Atomic claims consume approval and persist unknown reservations before dispatch.
+Live claims also enforce durable per-recipient/global limits, repeated-payload
+suppression and optional reply-context/echo-loop checks. Replies must provide
+stored inbound context. There are no automatic retries for any claimed outcome.
 
-There is no authenticated human approval UI yet. Python APIs do not isolate
-malicious code running under the same user. Do not expose the store or outbound
-API to untrusted code or a model. Real transport would require process/capability
-isolation, rate limits, loop prevention, reconciliation, and a kill switch.
+There is no authenticated approval UI or same-user process isolation. Raw adapter
+and Store methods are implementation APIs; trusted Python can bypass them or
+invoke the OS itself. Do not expose these APIs to untrusted code or a model.
+Process/capability isolation is required before introducing untrusted execution.
+See [architecture](docs/architecture.md) for exact limits, conservative duplicate
+suppression and clock/reply-context limitations, and the
+[later single-message procedure](docs/macos-outbound-validation.md) for Automation
+permission and delivery evidence requirements. No SMS/group/attachment path is
+provided. Transport acceptance is never delivery confirmation.
+
+The operator explicitly selects a positively verified iMessage account using
+`setup-imessage-account`. Only that saved stable ID is checked for iMessage,
+enabled/connected status and exact recipient ownership before dispatch. Unrelated
+service-type errors are not account-selection evidence. The one private selection
+file is separate from approval/attempt state, never overwritten by setup, and
+never enables sending. Missing, stale or unsafe selections fail closed.
 
 ## Data handling
 
@@ -33,7 +46,8 @@ defend against another process with the same user's privileges.
 SQLite state is plaintext and can contain message bodies, recipient addresses,
 contacts, approvals, and schedules. Payload hashes are not anonymization.
 Encryption, retention, secure deletion, backup exclusions, and log redaction are
-not implemented. Do not ingest personal data into this foundation. The package
+not implemented. Personal-data ingestion requires explicit authorization and an agreed private
+state location; offline validation never opens personal databases. The package
 configures no telemetry, but a caller can still expose data through its own logs
 or backups.
 
@@ -56,3 +70,78 @@ Include the affected commit/version, a minimal synthetic reproduction, expected
 and observed behavior, and impact in the private report. This early project has
 no guaranteed response time or supported production deployment; fixes target the
 current development version.
+
+## Read-only adapter boundary
+
+`MacOSMessagesReader` opens only an explicit path using SQLite URI `mode=ro`,
+sets `PRAGMA query_only=ON`, disables trusted schema behavior, and denies writes,
+ATTACH, and configuration changes with a SQLite authorizer. It never performs
+checkpointing, journal changes, recovery writes, or attachment/Contacts access.
+Normal SQLite WAL reading uses shared-memory coordination; this is not a promise
+that OS lock or shared-memory bookkeeping is byte-for-byte unchanged.
+
+Diagnostics read schema metadata only and print fixed error codes, compatibility,
+permission guidance and the Python executable, never message rows, addresses,
+chat identifiers, database paths or SQLite exception text. The reader does not
+log. Outbound records cannot trigger replies because ingestion has no reply
+worker, and the real reader cannot be passed as an outbound transport.
+
+File replacement and sequence rollback fail closed. In-place restores with reused
+ROWIDs and changes below the cursor require future reconciliation. Read-only
+manual validation and exact permission/executable guidance are documented in
+[docs/macos-validation.md](docs/macos-validation.md). No broad access is requested
+by the package; do not grant it to an AI agent as part of validation.
+
+
+## Local drafting boundary
+
+Phase 3A uses only direct HTTP to `127.0.0.1:11434`, without proxies, redirects,
+cloud fallback, tools, model pulls, or external API calls. Remote-model metadata
+and cloud-tagged names are rejected before history is submitted. Run a trusted
+Ollama daemon with `OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1`; the client cannot
+prove a local daemon's implementation or listening interfaces. See the listener
+checks in [the runbook](docs/local-drafting.md).
+
+Style profiles and drafts contain filtered plaintext examples, exact recipient
+keys, and source references in mode-0600 agent state. Draft commands reuse source,
+sidecar, symlink, ownership and outside-checkout state-path checks. They do not
+copy raw history into the inbox or alter cursors. English regex filtering drops
+sensitive-looking examples and redacts context but can miss novel secrets and
+non-English content. This is data minimization, not comprehensive sanitization.
+
+Model output is untrusted. Claim review rejects credentials and malformed/meta
+output, holds clear personal claims/commitments for approval, and uses a separate
+schema-constrained local model check for ambiguous wording. Unknown/failed checks
+require approval; they do not discard otherwise reviewable text or grant sending
+rights. Natural-language acceptance does not broaden the existing narrow advisory
+eligibility predicate. Both rules and the local model can misclassify claims.
+Private draft JSON can now retain unverified personal claims for human correction;
+these must not be treated as established facts. No model can create an approval.
+Every
+classification is preview-only, including `AUTO_SEND_ELIGIBLE`; no classification
+creates an approval or reaches `Outbound`. There is no draft-to-send CLI. Existing
+supervised send rules remain mandatory for independently authored, authorized text.
+
+Held-out evaluation rebuilds profiles from preceding messages only and returns
+aggregate heuristic scores without raw history, reference replies or identifiers.
+Terminal draft content requires `--show-text`. No raw provider exceptions are
+printed. Ollama or other same-user processes can log locally; protect their
+configuration and keep private state out of cloud synchronization and backups.
+
+
+## Opt-in human evaluation review
+
+`review-drafts` requires `--show-text` and terminal stdin/stdout before source
+access. It intentionally reveals private context, the candidate and actual
+held-out text to the local owner, and stores snapshots/ratings in a dedicated
+mode-0600 SQLite file outside the checkout. This is plaintext personal data;
+keep it outside sync/backups and never attach it to issue reports. Terminal
+controls/bidi overrides are escaped. Resume opens no Messages content or model.
+
+The review file is distinct from core/profile/outbound state and is schema-checked
+before writes. Review paths reuse source/sidecar, symlink, hardlink, ownership and
+private-file checks. Human ratings cannot change contacts, approvals, attempts,
+profiles, model instructions or auto-sending. Context hydration and retrieval use
+only verified recipient/chat identities and precede each target; held-out replies
+are disclosed to the human only after model calls and are never fed into their
+own generation or claim review. Human/heuristic aggregates remain separate.

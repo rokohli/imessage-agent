@@ -86,6 +86,7 @@ class Message:
     sender: Recipient | None
     body: str | None
     occurred_at: float
+    is_service: bool = False
 
     def __post_init__(self) -> None:
         import math
@@ -102,6 +103,8 @@ class Message:
             raise ValueError("body must be text or None")
         if not math.isfinite(self.occurred_at):
             raise ValueError("message timestamp must be finite")
+        if type(self.is_service) is not bool:
+            raise ValueError("service metadata flag must be boolean")
 
 
 @dataclass(frozen=True)
@@ -157,6 +160,8 @@ class SendAttempt:
 
 
 def payload_hash(recipient: Recipient, body: str) -> str:
+    if type(recipient) is not Recipient:
+        raise ValueError("canonical_recipient_required")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("a non-empty text body is required")
     payload = json.dumps([recipient.key, body], ensure_ascii=False, separators=(",", ":"))

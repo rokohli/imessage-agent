@@ -1,22 +1,34 @@
 # imessage-agent
 
-An offline, mock-only Python foundation for a future local-first macOS iMessage
-agent. No personal Messages or Contacts database discovery/access, AppleScript,
-network client, AI API integration, background worker, or live send implementation
-is included. Importing the package does no I/O. The default adapter is synthetic;
-`create_adapter("live")` raises an error. There is no enable-live setting.
+A local-first Python messaging foundation with read-only macOS ingestion and a
+controlled text-only AppleScript transport. Sending defaults to disabled in every
+environment; the factory remains synthetic. Phase 3A includes local Ollama drafting
+and human evaluation. Automatic replies and background sending remain disabled.
+Importing performs no I/O. Real sending requires
+separate authorization and explicit trusted in-process enablement.
 
 The long-term goal is a local-first macOS agent with secure auto-replies, human
-approval, and randomized scheduling. Those user-facing capabilities are planned,
-not operational. This repository currently provides only the offline foundation.
+approval, and randomized scheduling. Draft generation is preview-only; human ratings do not authorize sending.
+Scheduling execution is the next phase.
+
+Phase 3A status: personalized general/contact profiles, conversation-aware retrieval,
+claim review, punctuation policy, human review and fixed-case blind comparison are
+implemented. Default: `qwen2.5:3b`, loopback Ollama, temperature 0.3, 160 output
+tokens. **256 offline tests pass** (2026-10-27). The owner-reported 20-case baseline
+had style 2.0/5, relevance 2.1/5, naturalness 1.9/5 and 0/20 observed inventions;
+post-improvement quality is unmeasured. See the [evaluation report](docs/phase3a-evaluation-report.md).
+Autonomous replies remain disabled.
 
 ## Current features
 
-- Synthetic message ingestion with transactional cursors and GUID deduplication.
+- Synthetic and read-only Messages ingestion with transactional cursors and GUID deduplication.
+- Schema-only, content-free CLI diagnostics for an explicitly supplied database.
+- Seconds/nanoseconds timestamps, schema variants, and best-effort attributed text.
 - Exact recipient identities, default-deny permissions, and payload-bound approval
-  primitives for mock dispatches.
+  primitives for controlled dispatches.
 - Durable attempt records that prevent automatic retries of ambiguous outcomes.
 - Schedule storage and cancellation, without random selection or execution.
+- Durable live rate limits, reply/echo-loop checks and default-disabled individual iMessage transport.
 - An isolated attributed-body decoder and standard-library offline tests.
 
 ## Installation and configuration
@@ -29,9 +41,9 @@ cd imessage-agent
 ```
 
 Run directly from source using the command below. There are no runtime
-dependencies, environment variables, credentials, or configuration files to set
-up. An `.env.example` is therefore unnecessary. There is no installable service
-or application entry point yet.
+dependencies, provider credentials, or environment-based live settings. Outbound
+use requires the one-time local account selection described below; ingestion and
+offline tests do not. There is no installable service or background application.
 
 ## Run safe tests without installation
 
@@ -46,8 +58,22 @@ SQLite files only inside temporary directories and remove them afterward. They
 do not import the original project or require any third-party runtime packages.
 No dependency installation is needed. Packaging has not been tested; a future
 package build would require the declared `setuptools>=68` backend. Report the
-resolved build tools and artifacts before installing anything. There is no CLI
-or automatically started daemon in this phase.
+resolved build tools and artifacts before installing anything. There is no
+automatically started daemon. Use a Python 3.10+ executable; the system `python3`
+on some Macs is older. No dependencies were added or installed for the reader.
+
+## Read-only diagnostic
+
+Only use an explicitly authorized database path. This checks schema metadata
+without displaying message contents or reading message rows:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m imessage_agent diagnose --database /authorized/path/chat.db
+```
+
+See [the separate manual procedure](docs/macos-validation.md) for permissions,
+the responsible executable, content-ingestion authorization and compatibility
+limits. No personal Messages access is part of the offline test suite.
 
 ## Architecture and file structure
 
@@ -55,17 +81,24 @@ or automatically started daemon in this phase.
 src/imessage_agent/
   models.py       exact recipient identities and immutable data contracts
   adapters.py     narrow read protocol, mock reader/dispatcher, mock-only factory
+  macos.py        explicit-path read-only Messages reader and schema checks
+  __main__.py     content-free diagnostics, ingestion and classification commands
+  smoke.py        bounded ingestion and temporary-state replay
+  validation.py   owner-selected fictional direction checks
+  applescript.py  disabled-by-default individual iMessage text transport
+  account_selection.py  private saved account ID, separate from outbound state
   attributed.py   isolated best-effort upstream text decoder
   storage.py      private SQLite state, cursors, contacts, approvals and attempts
   ingestion.py    ordered batch validation and atomic persistence
-  outbound.py     default-deny outbound gate; synthetic adapter only
+  outbound.py     approval gate, optional reply context and explicit live transport
 tests/
   test_foundation.py
+  test_macos.py    generated synthetic SQLite fixtures, including WAL
 LICENSE
 THIRD_PARTY_NOTICES.md
 ```
 
-The future process boundary is:
+The control flow is (no untrusted execution is implemented):
 
 ```text
 read-only source -> durable inbox -> untrusted context -> draft proposal
@@ -73,9 +106,12 @@ read-only source -> durable inbox -> untrusted context -> draft proposal
 trusted local policy/approval -> durable attempt claim -> messaging adapter
 ```
 
-There is currently no model or AI tool interface. A future model should receive
-only selected context and propose drafts. Never give it arbitrary Python, direct
-SQLite access, contact administration, approval creation, or a raw dispatch tool.
+Phase 3A adds a local-only Ollama draft generator (default `qwen2.5:3b`). It gets
+filtered style examples and preceding context, with no tools or dispatch access.
+See [local drafting and evaluation commands](docs/local-drafting.md) and the
+[evaluation report](docs/phase3a-evaluation-report.md). Draft classifications never
+grant an approval or enable auto-sending. Never give a model arbitrary Python,
+direct SQLite access, contact administration, approval creation, or raw dispatch.
 Python module privacy is not a security sandbox: trusted code with this process's
 privileges can bypass its APIs. The policy boundary needs a separate process or
 equivalent capability restriction before any untrusted execution is introduced.
@@ -84,8 +120,9 @@ equivalent capability restriction before any untrusted execution is introduced.
 
 `MessagesReader.read_after(sequence, limit)` returns a strictly increasing prefix
 of an append-only stream. Order is source sequence, not message timestamp. Gaps
-are permitted; omission of an existing earlier record is not. A future source
-adapter must establish this guarantee rather than trusting the model to page.
+are permitted; omission of an existing earlier record is not. The Messages adapter
+uses message ROWID, with one message per row regardless of duplicate chat joins.
+It never pages by timestamps.
 
 Messages carry GUID, sequence, chat identity, direction, exact sender, optional
 body, and timestamp. `(source_id, guid)` is the durable deduplication key.
@@ -99,15 +136,23 @@ payloads fail closed for reconciliation. A stale competing ingestion transaction
 must fetch again. Cursors survive process restarts. A changed source generation
 requires explicit reconciliation, never silent reset or replay.
 
-The generation is an adapter-supplied stream incarnation, not a verified Apple
-database identity. A live adapter must detect replacement/restoration, sequence
-rollback, late materialization, and updates to existing rows. This implementation
-does not track edits, unsends, read receipts, or delivery updates on existing rows.
+For the Messages adapter, source identity hashes the explicit resolved path;
+generation uses filesystem device, inode and birthtime where available. File
+replacement fails closed, including across restarts; a maximum ROWID below the
+durable cursor also fails closed. This is an append-only import, not a complete
+Messages synchronizer. In-place restores that reuse ROWIDs, edits, unsends, late
+iCloud hydration and late chat joins below the cursor are not detected or
+re-imported. Reconciliation of these cases remains a blocker for dependable
+continuous synchronization; never reset a cursor automatically.
 
 `attributed.py` is an isolated parser helper covered by synthetic fixtures. It
-is not wired to a live database. It rejects malformed/truncated content and
-invalid UTF-8, and is not a complete typedstream decoder. Preserve undecodable
-records for review instead of silently advancing past them in a future adapter.
+is reused by the read-only adapter when plain text is absent. It rejects
+malformed/truncated content and invalid UTF-8, and is not a complete typedstream
+decoder. Undecodable and attachment-only rows are persisted with a null body; no
+attachment paths or contents are accessed. Unknown senders, missing/ambiguous
+chats, and recognized system events become system records. Invalid required GUIDs
+or timestamps stop the batch without advancing the cursor. Outgoing rows remain
+outbound, including unknown-chat rows. Ingestion has no automatic-reply path.
 
 ## Recipient and outbound policy
 
@@ -122,7 +167,7 @@ Only individual addresses are representable:
   are never authorization identities.
 - Groups and attachments have no outbound API in Phase 1.
 
-Every mock dispatch needs BOTH an exact contact with `outbound_allowed=True`
+Every dispatch needs BOTH an exact contact with `outbound_allowed=True`
 and an unused, unexpired approval bound to the exact recipient and body. All
 contacts default to denied. All replies require approval in this phase; there
 is no routine-message exemption or sensitive-content classifier.
@@ -133,7 +178,7 @@ A real human authentication/approval channel is still a deployment blocker.
 
 The outbound gate rechecks policy while atomically recording the attempt and
 consuming its approval. It commits an `unknown` reservation BEFORE invoking the
-mock dispatcher. Reusing an attempt ID with the same payload returns its stored
+selected dispatcher. Reusing an attempt ID with the same payload returns its stored
 result without dispatch. Reusing it for a different payload raises. A consumed
 approval cannot authorize a new attempt. Denied attempts are recorded as failed
 and never dispatched; a new authorization decision needs a new attempt ID.
@@ -146,7 +191,8 @@ cannot recall an action after its dispatch claim has been committed.
 
 ## Structured send outcomes
 
-All current outcomes are simulated, never evidence of a real delivery.
+Offline transport outcomes are mocked. A later live AppleScript return can establish
+transport acceptance only; the implementation never claims sent or delivered.
 
 | Status | Meaning for a future validated transport |
 | --- | --- |
@@ -167,8 +213,8 @@ The mock defaults to unknown. No SMS fallback or transport retry exists.
 dedicated private directory. New directories use mode 0700 and the database is
 created with mode 0600; permissive existing DB files and file symlinks are refused.
 Parent paths must be trusted; this does not defend against a malicious same-user
-process replacing files. SQLite foreign keys are enabled and schema version 1 is
-checked; unrelated nonempty version-0 databases are refused.
+process replacing files. SQLite foreign keys are enabled and schema version 2 is
+checked (v1 state upgrades transactionally); unrelated nonempty version-0 databases are refused.
 
 | Table | Purpose |
 | --- | --- |
@@ -178,6 +224,7 @@ checked; unrelated nonempty version-0 databases are refused.
 | approvals | Exact payload hash, expiration, and the consuming attempt. |
 | schedules | Canonical recipient, exact text, UTC epoch window/chosen time, IANA timezone, approval, pending/cancelled state. |
 | send_attempts | Idempotency ID, recipient, payload hash, approval, explicit outcome and provider identifier. |
+| outbound_claims | Durable live rate/payload reservations, generated-body hash and optional unique reply context. |
 
 Schedule insertion checks the contact, payload approval, timezone, and window.
 It stores a preselected timestamp; random selection, scheduling workers,
@@ -189,10 +236,15 @@ There is no scheduler enabled merely by storing a pending row.
 
 ## Privacy and permissions
 
-No macOS permissions are needed for this phase. No Apple databases, AppleScript,
-Contacts automation, credential stores, model providers, or external services
-are used. The mock never performs real sends, regardless of supplied addresses.
-No logging or telemetry is configured by this package.
+Offline tests need no macOS privacy permissions. The reader accepts only an
+explicit path; imports and CLI help do not discover or open Apple databases. No
+logging or telemetry is configured. Live sending remains disabled.
+
+Read-only access to protected Messages data is subject to macOS file permissions
+and TCC. See [the separate manual validation procedure](docs/macos-validation.md)
+for the responsible executable/host, permission requirements, diagnostics, and
+limits. This tool never requests broader filesystem access or changes permissions.
+No personal Messages database has been accessed during offline validation.
 
 Agent state contains plaintext message bodies, addresses, schedule bodies, and
 metadata. SQLite is not encrypted. Hashes bind approvals; they do not anonymize
@@ -201,44 +253,67 @@ directories, crash dumps, or an external client that receives it. Define retenti
 backup exclusions, audit-log redaction, and model-context minimization before
 ingesting personal data. Deletion/secure erasure is not implemented.
 
-Any future live read adapter will require separately authorized testing of macOS
-TCC/Full Disk Access behavior for a dedicated host. Full Disk Access is broader
-than Messages. Sending would additionally require verified Messages automation
-and account behavior. Contacts access should be omitted unless explicitly needed;
-canonical contacts can instead be entered in the trusted local control plane.
-No existing permissions have been inspected, requested, or changed.
+No existing macOS permissions have been inspected, requested, or changed.
 
-## Unresolved compatibility and deployment blockers
+## Select and validate an iMessage account without sending
 
-- No real macOS compatibility has been established: chat.db schema, timestamps,
-  GUID stability, typedstream variants, iCloud hydration, group IDs, and source
-  replacement behavior remain unverified.
-- No live sending code, AppleScript, delivery correlation, group support, file
-  transfer, fallback, or real transport outcome validation exists.
-- No authenticated approval UI, AI integration, automatic reply policy, rate
-  limits, reply-loop prevention, manual-reply suppression, or kill switch exists.
-- No scheduling executor, randomized-window selection, or crash reconciliation
-  worker exists. Schema models alone do not provide those capabilities.
-- No retention/encryption policy, packaging installation test, daemon service,
-  or deployment configuration is included.
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /opt/anaconda3/bin/python3 -m imessage_agent setup-imessage-account
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /opt/anaconda3/bin/python3 -m imessage_agent diagnose-applescript
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /opt/anaconda3/bin/python3 -m imessage_agent diagnose-applescript --check-recipient
+```
 
-Next work should remain fixture-driven: define the live reader's exact schema
-contract and database-incarnation strategy; expand synthetic schema/restore
-tests; build the trusted approval channel and durable scheduling semantics.
-Only after separate authorization should test-account macOS checks begin. Keep
-all real sending disabled until policy, limits, reconciliation, and the kill
-switch have been validated. Do not enable autonomous replies during that work.
+Setup lists positively identified iMessage accounts with numeric labels. Select
+one; its stable ID is saved in a private local file, without enabling sending.
+Default diagnostics and transport verify only this saved account's exact ID,
+iMessage service, enabled/connected status and exact recipient ownership.
+Unrelated unreadable service types do not block the operator-selected account.
+The recipient command requires explicit authorization and hidden operator input.
+All three commands contain no send event. Existing attempts/approvals are untouched.
 
-## Roadmap
+See [setup, errors and a later supervised test](docs/macos-outbound-validation.md).
+The prior UNKNOWN attempt must never be reset or retried. A future test requires
+NEW text and fresh authorization, using the same existing outbound state.
 
-1. Define and test the reader schema and source-incarnation contract using only
-   synthetic SQLite fixtures, including restoration and late-materialized rows.
-2. Build an authenticated human approval channel and durable scheduling claims,
-   then implement randomized-window selection and reconciliation offline.
-3. Add rate limits, loop prevention, manual-reply suppression, retention controls,
-   and a kill switch before any separately authorized test-account integration.
-4. Evaluate a narrowly scoped AI drafting interface and explicit context consent;
-   autonomous replies and live transport require their own validation gates.
+## Supervised single-message test
+
+After successful no-send validation, an operator can run `send-supervised-test
+--state /existing/outbound-state.sqlite3` manually. It requires new hidden text,
+fresh exact-payload approval and the phrase `SEND ONE NEW IMESSAGE`. It uses the
+saved account and permits at most one dispatch, with no retries. The previous
+UNKNOWN history is retained and its text is refused. See the
+[exact command and verification steps](docs/macos-outbound-validation.md#one-supervised-live-test-operator-execution-only).
+Do not execute the live command during development or in an automation loop.
+
+## Controlled outbound and remaining blockers
+
+`AppleScriptMessagesAdapter()` is disabled. Only explicit `enabled=True` and the
+trusted `Outbound` approval gate permit a later send. Environment variables never
+enable it. Text is sent to one exact participant on the explicitly selected, connected iMessage
+account; there is no group destination, name matching, attachment API or fallback.
+Live reservations enforce one send per recipient and three globally per rolling
+60 seconds. Repeated recipient/payloads and repeated reply contexts are blocked
+across restarts. Unknown outcomes are never automatically retried.
+
+For a reply, trusted callers must supply `reply_to=(source_id, guid)`; the gate
+rejects outgoing/system records, sender mismatches and known generated-text echoes.
+Direct messages still require their own explicit recipient opt-in and exact-text
+approval. There is no automatic reply engine. The synthetic default mock retains
+its previous simulation behavior and does not impose live transport limits.
+
+See [architecture and safety contracts](docs/architecture.md) and the
+[separately authorized single-message procedure](docs/macos-outbound-validation.md).
+That procedure has not been run. Automation permissions, AppleScript runtime,
+routing, unknown recipients and actual delivery still need live validation.
+No authenticated approval UI, process isolation, delivery reconciliation,
+continuous Messages synchronization, retention/encryption policy, scheduler,
+AI integration or production deployment is provided.
+
+Phase 2A.1 was owner-validated with schema compatibility, 70 committed records,
+persistent cursor recovery and a 25-record replay with zero duplicates. Those
+results do not prove every classification. The
+[fictional-message classification workflow](docs/macos-validation.md#selected-fictional-message-classification)
+checks explicit local expectations without printing contents or identifiers.
 
 See [SECURITY.md](SECURITY.md) for security limitations and private vulnerability
 reporting, and [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance.
@@ -251,3 +326,41 @@ is not a runtime dependency and is not modified by this project.
 
 Distributed under the [MIT license](LICENSE), including the retained upstream
 copyright and permission notice.
+
+
+## Phase 3A local drafting
+
+`model-health`, `build-profiles`, `draft-preview`, `evaluate-drafts`, `compare-drafts`,
+and the opt-in `review-drafts` command implement
+private local style imitation and held-out evaluation. The read-only adapter must
+verify individual chat membership; filtered outgoing messages form general and
+per-recipient style profiles. Recent context and representative prior replies
+stay on the same machine. Ollama is required at `127.0.0.1:11434`; remote/cloud
+models, proxies, redirects, and provider fallbacks are not used. No new dependency
+is required.
+
+Drafts and source references are saved in private agent state. No draft sends,
+creates approvals, or changes recipient permissions. Claim-based content review
+accepts natural reactions and clarification, retains unverified personal claims
+for approval, and discards credentials or broken output. Ambiguous wording gets
+a separate local model review. Missing personal facts or decisions are marked
+`NEEDS_USER_INPUT`; sending still requires the existing approval flow. Sensitive filtering is heuristic,
+not a guarantee that all private content will be recognized.
+
+See [the runbook](docs/local-drafting.md) for exact setup, health check, profile,
+preview, comparison and offline-test commands. Personal history and model quality
+were not validated during implementation; the report distinguishes mocked checks
+from measured local-model performance.
+
+`compare-drafts` freezes the exact 20 cases from an existing review, generates the
+punctuation-fixed 3B baseline and improved 3B pipeline, and adds improved 7B only
+if already installed locally. A separate private file shuffles trials for blind
+rating; completed reviews report human quality, invention labels, heuristics and
+latency separately. See [the fixed-case comparison commands](docs/human-review.md#blind-comparison-on-the-same-20-saved-cases).
+
+
+[Human quality review](docs/human-review.md) shows private held-out comparisons
+and saves style/relevance/naturalness ratings plus invention labels in a separate
+local review file. It reports human quality independently of heuristic scores and
+content-acceptance rates. Resume uses saved snapshots without regenerating drafts.
+Ratings never grant sending approval or turn on autonomous replies.

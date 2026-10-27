@@ -1,4 +1,4 @@
-"""No live implementation, subprocess execution, network, or personal DB paths."""
+"""Read protocol and mock-only dispatch factory; real reading is in macos.py."""
 
 from __future__ import annotations
 
@@ -14,9 +14,15 @@ class MessagesReader(Protocol):
     def read_after(self, sequence: int, limit: int) -> Batch:
         """Return a strictly sequence-ordered prefix, without side effects.
 
-        Source/generation identify one append-only stream. A future live adapter
-        must detect replacement/reset and never substitute timestamps for order.
+        Source/generation identify one append-only stream. Readers must detect replacement/reset within their documented limits and
+        never substitute timestamps for order.
         """
+        ...
+
+
+class MessagesTransport(Protocol):
+    def dispatch(self, recipient: Recipient, body: str) -> SendOutcome:
+        """Accept one exact individual text payload; never infer delivery."""
         ...
 
 
@@ -52,5 +58,5 @@ class MockMessagesAdapter:
 
 def create_adapter(mode: str = "mock") -> MockMessagesAdapter:
     if mode != "mock":
-        raise ValueError("live access and live sending are not implemented")
+        raise ValueError("factory permits mock only; use MacOSMessagesReader for explicit read-only access")
     return MockMessagesAdapter()
