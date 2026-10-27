@@ -54,9 +54,11 @@ def review_reply(reply, *, needs_facts, context, classify):
         return 'approval_required', 'sensitive'
     if _ASSENT.fullmatch(reply) and any(row['body'] == '[content excluded]' for row in context):
         return 'approval_required', 'redacted_context'
-    latest = next((row['body'] for row in reversed(context) if row['direction'] == 'inbound'), '')
-    if not reply.endswith('?') and _CONTEXT_RISK.search(latest):
-        return 'approval_required', 'consequential_context'
+    for row in reversed(context):
+        if row['direction'] != 'inbound':
+            break
+        if not reply.endswith('?') and _CONTEXT_RISK.search(row['body']):
+            return 'approval_required', 'consequential_context'
     # Emoji/punctuation alone asserts no facts, but risky conversation context was checked first.
     if not re.search(r'\w', reply):
         return 'accepted', 'harmless'
