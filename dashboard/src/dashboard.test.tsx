@@ -14,6 +14,10 @@ import { ScheduleForm, validateSchedule } from "./ScheduleForm";
 import { App } from "./main";
 vi.mock("./api", () => ({
   api: {
+    thresholds: vi.fn(),
+    saveThresholds: vi.fn(),
+    refreshContacts: vi.fn(),
+    clearContacts: vi.fn(),
     worker: vi.fn(),
     summary: vi.fn(),
     health: vi.fn(),
@@ -55,6 +59,7 @@ const settings = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(api.thresholds).mockResolvedValue({gap_seconds: 14400, day_gap_seconds: 1800, burst_seconds: 15});
   vi.mocked(api.worker).mockResolvedValue({status: "stopped", heartbeat: null, last_poll: null, pending_count: 0, next_execution: null, recent_errors: [], last_outcome: null, transport: null});
   vi.mocked(api.settings).mockResolvedValue(settings);
   vi.mocked(api.accounts).mockResolvedValue({
@@ -403,4 +408,29 @@ it("hides previous worker health on failed or pending refresh and restores fresh
   } finally {
     vi.useRealTimers();
   }
+});
+
+
+it("shows contact labels, session boundaries and timestamps while retaining the canonical approval recipient", async () => {
+  vi.mocked(api.drafts).mockResolvedValue([{...draft, display_name: "Synthetic Alice", conversation_state: "NEW_SESSION",
+    context: [{direction: "inbound", body: "Dinner plans", timestamp: "2026-10-27T18:00:00-05:00", session_start: true},
+      {direction: "outbound", body: "Old homework", historical: true, topic_boundary: true}]}]);
+  render(<Drafts />);
+  expect(await screen.findByRole("heading", {name: "Synthetic Alice"})).toBeInTheDocument();
+  expect(screen.getByText(/NEW SESSION/)).toBeInTheDocument();
+  expect(screen.getByText(/Session starts/)).toBeInTheDocument();
+  expect(screen.getByText(/Historical context/)).toBeInTheDocument();
+  expect(screen.getByText("2026-10-27T18:00:00-05:00")).toBeInTheDocument();
+});
+
+it("requests Contacts permission only on an explicit click and clears the cache", async () => {
+  vi.mocked(api.refreshContacts).mockResolvedValue({status: "denied"});
+  vi.mocked(api.clearContacts).mockResolvedValue({});
+  render(<SettingsPage />);
+  expect(api.refreshContacts).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole("button", {name: "Request Contacts access"}));
+  await waitFor(() => expect(api.refreshContacts).toHaveBeenCalledWith(true, null));
+  expect(await screen.findByText("denied")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Clear contact cache"}));
+  await waitFor(() => expect(api.clearContacts).toHaveBeenCalledOnce());
 });

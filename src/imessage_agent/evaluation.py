@@ -70,7 +70,7 @@ def case_history(rows, incoming, reader=None):
     """Hydrate exact recent chat context omitted by the bounded style sample."""
     preceding = {m.sequence: m for m in rows if m.sequence <= incoming.sequence}
     if reader is not None:
-        batch = reader.read_before(incoming.sequence, 12, chat_id=incoming.chat_id)
+        batch = reader.read_before(incoming.sequence, 1000, chat_id=incoming.chat_id)
         if batch.source_id != reader.source_id or batch.generation != reader.generation:
             raise DraftError('case_context_source_changed')
         for message in batch.messages:

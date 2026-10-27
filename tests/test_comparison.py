@@ -15,7 +15,7 @@ import test_review
 class ComparisonTests(unittest.TestCase):
     setUp = test_review.ReviewTests.setUp
 
-    def prepare(self, *, models=('qwen2.5:3b',), reply='bruh 💀'):
+    def prepare(self, *, models=('qwen2.5:3b',), reply='bruh 💀', command='compare-drafts'):
         if not self.ratings.exists():
             result = test_review.ReviewTests.invoke(self, ['4 5 3 n'] * 20)
             self.assertEqual(result[0], 0)
@@ -30,7 +30,7 @@ class ComparisonTests(unittest.TestCase):
             return provider
         output = io.StringIO()
         with contextlib.redirect_stdout(output), patch('imessage_agent.comparison.Ollama', side_effect=factory):
-            status = main(['compare-drafts', '--database', str(self.path), '--source-review', str(self.ratings),
+            status = main([command, '--database', str(self.path), '--source-review', str(self.ratings),
                            '--comparison', str(self.output_path), '--max-messages', '10000'])
         self.preparation_text = output.getvalue()
         return status, json.loads(self.preparation_text.splitlines()[-1])
@@ -41,6 +41,28 @@ class ComparisonTests(unittest.TestCase):
             return store.session(), [json.loads(row['snapshot_json']) for row in store.cases()]
         finally:
             store.close()
+
+    def test_session_comparison_freezes_twenty_cases_and_keeps_quality_separate(self):
+        status, report = self.prepare(command='compare-sessions')
+        self.assertEqual(status, 0)
+        self.assertEqual(report['trials'], 40)
+        metadata, snapshots = self.snapshots()
+        self.assertTrue(metadata['session_study'])
+        self.assertEqual(metadata['variants']['A']['pipeline'], 'legacy_context')
+        store = ReviewStore(self.output_path, resume=True)
+        try:
+            for row in store.cases():
+                store.rate(row['ordinal'], dict(style=3, relevance=4, naturalness=4,
+                    invents_personal_information=False, session_boundary_correct=True,
+                    topic_switch_correct=None, unnecessary_reply=False))
+            summary = store.summary()
+            for variant in summary['variants'].values():
+                self.assertEqual(variant['conversation_quality']['session_boundary_correct']['rate'], 1)
+                self.assertIsNone(variant['conversation_quality']['topic_switch_correct']['rate'])
+                self.assertEqual(variant['human_review']['mean_style'], 3)
+        finally:
+            store.close()
+        self.assertFalse(report['auto_sending'])
 
     def test_exact_cases_and_source_files_preserved_with_future_reply_excluded(self):
         test_review.ReviewTests.invoke(self, ['4 5 3 n'] * 20)
@@ -63,7 +85,7 @@ class ComparisonTests(unittest.TestCase):
             source_cases = sorted((s for s in snapshots if s['variant'] == 'A'), key=lambda s: s['source_case'])
             for case, messages, claim in zip(source_cases, provider.prompts, provider.claim_reviews):
                 prompt = json.loads(messages[1]['content'])
-                conversation = prompt.get('conversation', prompt.get('current_conversation'))
+                conversation = prompt.get('conversation', prompt.get('CURRENT_SESSION'))
                 self.assertTrue(conversation)
                 self.assertNotIn('actual phrase t', json.dumps(messages))  # Final actual is never preceding.
                 encoded = json.dumps([messages, claim])
@@ -119,8 +141,9 @@ class ComparisonTests(unittest.TestCase):
         old, new = [json.loads(p[1]['content']) for p in prompts]
         self.assertIn('contact_examples', old)
         self.assertNotIn('contact_examples', new)
-        self.assertIn('conversation_examples', new)
-        self.assertEqual(old['punctuation_policy'], new['punctuation_policy'])
+        self.assertIn('STYLE_EXAMPLES', new)
+        self.assertEqual(old['punctuation_policy']['allowed_marks'], new['punctuation_policy']['allowed_marks'])
+        self.assertEqual(old['punctuation_policy']['default'], new['punctuation_policy']['default'])
         from imessage_agent.drafting import _PUNCTUATION_INSTRUCTIONS
         for messages in prompts:
             self.assertIn(_PUNCTUATION_INSTRUCTIONS.strip(), messages[0]['content'])

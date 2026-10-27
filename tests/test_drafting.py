@@ -34,7 +34,7 @@ def msg(n, body, outgoing=False, chat='a'):
 
 
 ROWS = [msg(1, 'thanks'), msg(2, 'no worries', True), msg(3, 'how is it going?', chat='b'),
-        msg(4, 'great', True, chat='b'), msg(5, 'thanks')]
+        msg(4, 'great', True, chat='b'), msg(5, 'hey')]
 
 
 class FakeProvider:
@@ -82,7 +82,7 @@ class DraftingTests(unittest.TestCase):
         prompt = json.loads(provider.prompts[0][1]['content'])
         self.assertNotIn('contact_examples', prompt)
         self.assertNotIn('general_examples', prompt)
-        self.assertEqual(prompt['conversation_examples'], [])
+        self.assertEqual(prompt['STYLE_EXAMPLES'], [])
         self.assertNotIn('how is it going?', json.dumps(prompt))
         self.assertNotIn(ALICE.address, json.dumps(prompt))
         self.assertEqual(draft['classification'], 'AUTO_SEND_ELIGIBLE')
@@ -441,7 +441,7 @@ class DraftCLITests(unittest.TestCase):
         self.db.execute('INSERT INTO chat_handle_join VALUES (1,1)')
         add(self.db, 1, text='thanks')
         add(self.db, 2, text='no worries', is_from_me=1)
-        add(self.db, 3, text='thanks')
+        add(self.db, 3, text='hey')
 
     def tearDown(self):
         self.db.close()

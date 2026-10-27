@@ -15,7 +15,7 @@ from .smoke import SmokeError, run
 from .validation import validate_classification
 from .supervised import send_one_supervised
 from .draft_cli import COMMANDS, add_commands, run_command
-from . import schedule_cli, launchagent
+from . import schedule_cli, launchagent, contacts
 
 
 class SafeParser(argparse.ArgumentParser):
@@ -84,6 +84,7 @@ def main(argv=None) -> int:
     commands.add_parser("setup-imessage-account", help="Select and privately save a verified iMessage account; no send")
     supervised = commands.add_parser("send-supervised-test", help="LIVE: one manually confirmed NEW iMessage, no retries")
     supervised.add_argument("--state", type=Path, required=True, help="Existing outbound state containing the prior UNKNOWN")
+    contacts.add_commands(commands)
     add_commands(commands)
     schedule_cli.add_commands(commands)
     launchagent.add_commands(commands)
@@ -91,6 +92,8 @@ def main(argv=None) -> int:
     dashboard.add_argument('--state', type=Path, default=Path.home() / '.local/state/imessage-agent/state.sqlite3')
     dashboard.add_argument('--database', type=Path, help='Explicit read-only Messages source for diagnostics/regeneration')
     args = parser.parse_args(argv)
+    if args.command == 'contacts':
+        return contacts.run_command(args)
     if args.command in ('background-worker', 'launchagent'):
         return launchagent.run_command(args)
     if args.command == 'dashboard':

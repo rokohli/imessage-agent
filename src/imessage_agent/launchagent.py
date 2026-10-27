@@ -19,7 +19,7 @@ def plist_path():
     return Path.home() / 'Library/LaunchAgents' / (LABEL + '.plist')
 
 
-def configuration(state, *, live=False, interval=10):
+def configuration(state, *, live=False, interval=10, database=None):
     if not 1 <= interval <= 60:
         raise ValueError('invalid_worker_interval')
     root = Path(__file__).resolve().parents[2]
@@ -27,6 +27,8 @@ def configuration(state, *, live=False, interval=10):
     python = str(Path(sys.executable).absolute())
     args = [python, '-m', 'imessage_agent', 'background-worker', '--state', str(Path(state).resolve()),
             '--logs', str(application_directory() / 'logs'), '--interval', str(interval)]
+    if database is not None:
+        args.extend(['--database', str(Path(database).resolve())])
     if live:
         args.append('--execute-live')
     return dict(Label=LABEL, ProgramArguments=args, WorkingDirectory=str(root),
@@ -75,7 +77,7 @@ def manage(args):
             raise ValueError('existing_state_required')
         if path.exists() or path.is_symlink():
             raise ValueError('launchagent_already_installed')
-        payload = plistlib.dumps(configuration(state, live=args.execute_live, interval=args.interval))
+        payload = plistlib.dumps(configuration(state, live=args.execute_live, interval=args.interval, database=args.database))
         logger = private_logger(application_directory() / 'logs')
         for handler in logger.handlers:
             handler.close()
@@ -125,12 +127,14 @@ def add_commands(commands):
     p = commands.add_parser('background-worker', help='Run existing scheduler until SIGTERM; mock by default')
     p.add_argument('--state', type=Path, required=True)
     p.add_argument('--logs', type=Path, default=application_directory() / 'logs')
+    p.add_argument('--database', type=Path, help='Explicit read-only source for pending draft freshness checks')
     p.add_argument('--interval', type=int, default=10)
     p.add_argument('--execute-live', action='store_true', help='Execute previously authorized live schedules')
     p = commands.add_parser('launchagent', help='Explicit per-user LaunchAgent management; no sudo')
     p.add_argument('action', choices=('install', 'start', 'stop', 'restart', 'status', 'uninstall',
                                       'notifications-authorize', 'notifications-test'))
     p.add_argument('--state', type=Path)
+    p.add_argument('--database', type=Path, help='Explicit read-only source for pending draft freshness checks')
     p.add_argument('--interval', type=int, default=10)
     p.add_argument('--execute-live', action='store_true')
 
@@ -142,7 +146,7 @@ def run_command(args):
             return run_worker(args)
         if args.action == 'install' and args.state is None:
             raise ValueError('state_required')
-        if args.action != 'install' and (args.state is not None or args.execute_live or args.interval != 10):
+        if args.action != 'install' and (args.state is not None or args.database is not None or args.execute_live or args.interval != 10):
             raise ValueError('configuration_is_install_only')
         print(json.dumps(manage(args)))
         return 0

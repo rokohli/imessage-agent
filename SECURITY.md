@@ -199,3 +199,19 @@ Native notification permission is requested only by the explicit management
 command. Install/start/uninstall are local CLI operations, never import side effects.
 The per-user Aqua LaunchAgent defaults to mock, needs no sudo, and starts neither
 Ollama nor dashboard. Operational macOS/TCC/notification proof remains supervised.
+
+## Phase 3B local names and conversation state
+
+The opt-in native Contacts helper uses `CNContactStore` with a purpose string and
+explicit authorization action; it never accesses Contacts SQLite or modifies
+contacts. Private agent-state preferences cache names/handles, without changing
+canonical recipient keys or outbound allowlists. Names never enter model prompts.
+Enabled native notifications may show names; worker logs contain fixed categories.
+
+Session classification and timestamped context cannot authorize sends. Ending,
+burst and stale-source checks only veto drafts. The existing worker can cancel
+stale drafts and invalidate their unused approvals using ingested evidence or an
+explicit read-only Messages source. No auto-reply loop or UNKNOWN retry is added.
+Saved-case comparisons use a separate private database and local-only Ollama;
+model self-judgments are not human ratings or dispatch permission. See
+[Phase 3B behavior](docs/phase3b-conversations.md) for privacy and evidence limits.

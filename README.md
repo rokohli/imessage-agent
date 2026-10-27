@@ -400,3 +400,8 @@ rotating structured logs and fresh worker health in the dashboard.
 See [background installation, management and supervised validation](docs/background-agent.md).
 Nothing installs or activates automatically; live-message validation requires your
 explicit confirmation. The Mac must be awake with an appropriate Messages session.
+
+Phase 3B adds opt-in native Contacts display names and timestamped, session-aware
+reply context with ending/burst/staleness suppression. Auto replies remain off.
+See [Contacts and conversation behavior](docs/phase3b-conversations.md) for setup,
+limitations, worker freshness checks and same-case local evaluation.

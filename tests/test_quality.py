@@ -97,7 +97,7 @@ class QualityTests(unittest.TestCase):
         prompt = json.loads(messages[1]['content'])
         self.assertEqual(prompt['latest_incoming_turn'], ['miss you pal'])
         self.assertNotIn('contact_examples', prompt)
-        self.assertEqual(prompt['conversation_examples'], [])
+        self.assertEqual(prompt['STYLE_EXAMPLES'], [])
         self.assertFalse(draft['auto_sending'])
 
     def test_repeated_copy_or_failed_rewrite_stays_reviewable_never_loops(self):
@@ -146,7 +146,7 @@ class QualityTests(unittest.TestCase):
 
     def test_generic_acknowledgments_and_emoji_can_repeat_without_a_retry(self):
         for reply in ('no worries', 'lol 😂', '😭😭'):
-            rows = [msg(1, 'old topic'), msg(2, reply, True), msg(3, 'thanks')]
+            rows = [msg(1, 'old topic'), msg(2, reply, True), msg(3, 'hey')]
             provider = FakeProvider(reply)
             draft = generate(rows, CHATS, rows[-1], provider)
             self.assertEqual(draft['generation_attempts'], 1)

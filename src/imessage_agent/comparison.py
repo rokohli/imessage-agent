@@ -95,11 +95,15 @@ def run_comparison(args):
             'B': {'pipeline': 'improved', 'config': vars(base)},
         }
         skipped = []
-        if 'qwen2.5:7b' in installed:
+        session_study = args.command == 'compare-sessions'
+        if session_study:
+            variants = {'A': {'pipeline': 'legacy_context', 'config': vars(base)},
+                        'B': {'pipeline': 'improved', 'config': vars(base)}}
+        if not session_study and 'qwen2.5:7b' in installed:
             larger = replace(base, model='qwen2.5:7b')
             Ollama(larger).health()
             variants['C'] = {'pipeline': 'improved', 'config': vars(larger)}
-        else:
+        elif not session_study:
             skipped.append({'variant': 'C', 'model': 'qwen2.5:7b', 'reason': 'not_installed_locally'})
         jobs = [(label, case['source_case']) for label in variants for case in frozen]
         random.SystemRandom().shuffle(jobs)
@@ -110,7 +114,7 @@ def run_comparison(args):
                     'source_id': source_metadata['source_id'], 'generation': source_metadata['generation'],
                     'requested': len(jobs), 'cases_per_variant': 20, 'variants': variants,
                     'skipped_variants': skipped, 'sampling': sampling,
-                    'preparation_complete': False, 'created_at': time.time()}
+                    'preparation_complete': False, 'created_at': time.time(), 'session_study': session_study}
         store.put_session(metadata)
         prepared = 0
         for label, description in variants.items():
@@ -128,7 +132,8 @@ def run_comparison(args):
                     'variant': label, 'source_case': case['source_case'],
                     'source_guid': incoming.guid, 'held_out_guid': actual.guid,
                     'source_sequence': incoming.sequence, 'actual_sequence': actual.sequence,
-                    'context': case['context'], 'draft': draft, 'actual_reply': actual.body,
+                    'context': (sorted(draft.get('historical_context', []) + draft.get('context', []),
+                                       key=lambda m: m.get('occurred_at', 0)) if session_study and draft else case['context']), 'draft': draft, 'actual_reply': actual.body,
                     'generation_error': error, 'latency_ms': elapsed,
                     'heuristic_scores': compare(draft['reply'] if draft and draft['validation_status'] == 'accepted'
                                                 else '', actual.body),

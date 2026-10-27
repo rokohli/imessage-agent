@@ -17,4 +17,4 @@ test = ["httpx>=0.27,<1"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-imessage_agent = ["Notifier.swift"]
+imessage_agent = ["Notifier.swift", "Contacts.swift"]

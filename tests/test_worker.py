@@ -38,6 +38,23 @@ class WorkerTests(unittest.TestCase):
         self.worker = Worker(self.path, self.logger, clock=lambda: self.now, notify=self.notify, interval=1)
         self.scheduler = Scheduler(self.store, clock=lambda: self.now)
 
+    def test_unavailable_reply_source_does_not_block_authorized_schedule_polling(self):
+        from imessage_agent.macos import MessagesAccessError
+        with patch('imessage_agent.reply_lifecycle.invalidate_stale_drafts', side_effect=MessagesAccessError('permission_denied')), patch(
+                'imessage_agent.worker.Scheduler.tick') as tick:
+            self.worker.poll(self.store)
+        tick.assert_called_once()
+        self.assertEqual(self.worker.health['error'], 'reply_source_unavailable')
+        self.assertNotIn('permission_denied', self.output.getvalue())
+
+    def test_resolved_notification_names_stay_out_of_worker_logs(self):
+        with patch('imessage_agent.contacts.Contacts.resolve', return_value={
+                'display_name': 'Private Synthetic Name', 'resolution': 'resolved'}):
+            self.assertFalse(self.worker.present([('approval', self.recipient.address)]))
+        self.notify.assert_called_once_with('approval', 'Private Synthetic Name')
+        self.assertNotIn('Private Synthetic Name', self.output.getvalue())
+        self.assertNotIn(self.recipient.address, self.output.getvalue())
+
     def tearDown(self):
         self.worker.stop.set()
         self.worker.presenter.shutdown(wait=True)
@@ -179,7 +196,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(worker_status(self.store, self.path, now=self.now)['status'], 'stopped')
 
     def test_sigterm_sets_stop_and_restores_handlers(self):
-        args = SimpleNamespace(state=self.path, logs=Path(self.temp.name) / 'logs', interval=1, execute_live=False)
+        args = SimpleNamespace(state=self.path, logs=Path(self.temp.name) / 'logs', interval=1, execute_live=False, database=None)
         callbacks = {}
         def register(sig, handler):
             previous = callbacks.get(sig, signal.SIG_DFL)
@@ -505,7 +522,7 @@ class WorkerTests(unittest.TestCase):
     @patch('imessage_agent.launchagent.sys.platform', 'darwin')
     def test_invalid_install_does_not_publish_files_or_build_helper(self):
         home = Path(self.temp.name)
-        args = SimpleNamespace(action='install', state=self.path, execute_live=False, interval=0)
+        args = SimpleNamespace(action='install', state=self.path, execute_live=False, database=None, interval=0)
         with patch('pathlib.Path.home', return_value=home), patch('imessage_agent.launchagent.build_notifier') as build:
             with self.assertRaises(ValueError):
                 manage(args)
@@ -518,7 +535,7 @@ class WorkerTests(unittest.TestCase):
         path = home / 'Library/LaunchAgents' / (LABEL + '.plist')
         appdir = home / 'Library/Application Support/iMessage Agent'
         app = appdir / 'Notifier.app'
-        args = SimpleNamespace(action='install', state=self.path, execute_live=False, interval=10)
+        args = SimpleNamespace(action='install', state=self.path, execute_live=False, database=None, interval=10)
         with patch('pathlib.Path.home', return_value=home), patch('imessage_agent.launchagent.build_notifier') as build, patch(
             'imessage_agent.launchagent.launchctl', return_value=SimpleNamespace(returncode=0)) as ctl:
             result = manage(args)

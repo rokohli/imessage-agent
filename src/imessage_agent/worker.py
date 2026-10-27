@@ -122,12 +122,13 @@ def log_event(logger, timestamp, event, *, schedule_id=None, occurrence_id=None,
 
 
 class Worker:
-    def __init__(self, state, logger, *, live=False, interval=10, clock=time.time, notify=None):
+    def __init__(self, state, logger, *, live=False, interval=10, clock=time.time, notify=None, database=None):
         if not math.isfinite(interval) or not 1 <= interval <= 60:
             raise ValueError('invalid_worker_interval')
         self.state, self.logger, self.live = Path(state), logger, live
         self.interval, self.clock = interval, clock
         self.stop = threading.Event()
+        self.database = database
         self.notify = notify
         self.presenter = ThreadPoolExecutor(max_workers=1)
         self.presentation = None
@@ -153,7 +154,19 @@ class Worker:
             if self.stop.is_set():
                 break
             try:
-                (self.notify or notify_native)(outcome)
+                if isinstance(outcome, tuple):
+                    from .contacts import Contacts
+                    names_store = Store(self.state)
+                    try:
+                        resolved = Contacts(names_store).resolve(outcome[1])
+                    finally:
+                        names_store.close()
+                    if resolved['resolution'] == 'resolved':
+                        (self.notify or notify_native)(outcome[0], resolved['display_name'])
+                    else:
+                        (self.notify or notify_native)(outcome[0])
+                else:
+                    (self.notify or notify_native)(outcome)
             except Exception:
                 failed = True
         return failed
@@ -202,13 +215,27 @@ class Worker:
             self.event('schedule_outcome' if occurrence else outcome,
                        schedule_id=plan, occurrence_id=occurrence, outcome=outcome)
             if enabled:
-                outcomes.append(outcome)
+                address = None
+                if plan:
+                    address = Scheduler(store).details(plan)['spec']['recipient']
+                elif key.startswith('approval:'):
+                    draft_row = db.execute('SELECT recipient_key FROM reply_drafts WHERE id=?', (key.split(':')[1],)).fetchone()
+                    address = draft_row['recipient_key'].split(':', 1)[1] if draft_row else None
+                outcomes.append((outcome, address) if address else outcome)
                 if len(outcomes) == 5:
                     break
         if outcomes:
             self.presentation = self.presenter.submit(self.present, outcomes)
 
     def poll(self, store):
+        from .reply_lifecycle import invalidate_stale_drafts
+        from .macos import MessagesAccessError
+        reply_error = None
+        try:
+            invalidate_stale_drafts(store, database=self.database)
+        except MessagesAccessError:
+            reply_error = 'reply_source_unavailable'
+            self.attention(reply_error)
         self.health['heartbeat'] = self.clock()
         save_health(store.connection, self.health)
         Scheduler(store, clock=self.clock).tick(dry_run=False, live=self.live, should_stop=self.stop.is_set)
@@ -216,7 +243,7 @@ class Worker:
         if self.notification_failure:
             self.health['error'] = 'notification_unavailable'
         else:
-            self.health['error'] = None
+            self.health['error'] = reply_error
         self.notifications(store)
         save_health(store.connection, self.health)
 
@@ -265,7 +292,7 @@ def run_worker(args):
     # Private new SQLite companions and rotated logs inherit this mask.
     os.umask(0o077)
     logger = private_logger(args.logs)
-    worker = Worker(state, logger, live=args.execute_live, interval=args.interval)
+    worker = Worker(state, logger, live=args.execute_live, interval=args.interval, database=args.database)
     previous = {sig: signal.signal(sig, lambda *_: worker.stop.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
         return worker.run()
