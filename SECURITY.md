@@ -167,3 +167,18 @@ schedule can repeat identical content; prior UNKNOWN/PARTIAL or unrelated payloa
 claims still suppress it. All attempts and suppression records are retained.
 The CLI installs no daemon and wakes no Mac. Grace deadlines prevent stale sends
 when a stopped/asleep worker resumes. Dry-run is read-only and never dispatches.
+
+## Phase 5 local dashboard boundary
+
+The local web control plane binds only 127.0.0.1:8000, validates the exact Host
+and browser origins, and requires JSON plus a per-process session token for every
+mutation. The frontend uses the local Vite proxy or same-origin production assets.
+State upgrades to v5 retain existing claims/approvals and add preferences only.
+Schedule CRUD delegates to Phase 4, and draft review delegates to Store.approve;
+editing revokes the old unused permit. No API calls Outbound, runs a worker, retries
+UNKNOWN outcomes, exposes arbitrary paths/SQL or enables autonomous replies.
+Diagnostics omit raw exception text and private request values; access logging is
+disabled. An explicitly configured Messages source is read-only and used for
+verified regeneration/diagnostics. Private content is returned at runtime only,
+not built into JavaScript. Local processes and browser users remain trusted.
+See [the runbook](docs/local-dashboard.md) for the full boundary and limitations.

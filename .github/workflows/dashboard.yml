@@ -1,0 +1,32 @@
+name: Offline dashboard checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install backend and test dependencies
+        run: python -m pip install -e '.[dashboard,test]'
+      - name: Synthetic backend tests
+        run: PYTHONPATH=src python -m unittest discover -s tests -q
+      - name: Check API type synchronization
+        run: PYTHONPATH=src python scripts/dashboard_types.py --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: dashboard
+        run: npm install
+      - name: Component tests, type check and production build
+        working-directory: dashboard
+        run: |
+          npm test
+          npm run build

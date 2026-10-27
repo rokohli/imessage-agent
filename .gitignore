@@ -33,3 +33,5 @@ htmlcov/
 .vscode/
 *.pem
 *.key
+
+node_modules/

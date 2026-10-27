@@ -44,22 +44,32 @@ def load_account_id() -> str:
         raise AccountSelectionError("account_selection_unreadable") from None
 
 
-def save_account_id(account_id: str) -> None:
+def save_account_id(account_id: str, *, replace: bool = False) -> None:
     account_id = validate_account_id(account_id)
     path = selection_path()
+    temporary = None
     try:
         path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         info = path.parent.lstat()
         if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077
                 or info.st_uid != os.getuid()):
             raise AccountSelectionError("unsafe_account_selection_directory")
-        # Publish a complete private file atomically, without replacing any existing selection.
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=".account-") as file:
+        # Publish a complete private file atomically; replacement requires explicit trusted administration.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=".account-", delete=False) as file:
+            temporary = Path(file.name)
             json.dump({"account_id": account_id}, file)
             file.flush()
             os.fsync(file.fileno())
-            os.link(file.name, path, follow_symlinks=False)
+            if replace:
+                if path.exists() or path.is_symlink():
+                    load_account_id()  # Refuse an unsafe existing selection before replacement.
+                os.replace(file.name, path)
+            else:
+                os.link(file.name, path, follow_symlinks=False)
     except FileExistsError:
         raise AccountSelectionError("account_selection_already_exists") from None
     except OSError:
         raise AccountSelectionError("account_selection_unwritable") from None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
