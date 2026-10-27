@@ -15,7 +15,7 @@ from .smoke import SmokeError, run
 from .validation import validate_classification
 from .supervised import send_one_supervised
 from .draft_cli import COMMANDS, add_commands, run_command
-from . import schedule_cli
+from . import schedule_cli, launchagent
 
 
 class SafeParser(argparse.ArgumentParser):
@@ -86,10 +86,13 @@ def main(argv=None) -> int:
     supervised.add_argument("--state", type=Path, required=True, help="Existing outbound state containing the prior UNKNOWN")
     add_commands(commands)
     schedule_cli.add_commands(commands)
+    launchagent.add_commands(commands)
     dashboard = commands.add_parser('dashboard', help='Loopback-only local web dashboard; never starts a worker')
     dashboard.add_argument('--state', type=Path, default=Path.home() / '.local/state/imessage-agent/state.sqlite3')
     dashboard.add_argument('--database', type=Path, help='Explicit read-only Messages source for diagnostics/regeneration')
     args = parser.parse_args(argv)
+    if args.command in ('background-worker', 'launchagent'):
+        return launchagent.run_command(args)
     if args.command == 'dashboard':
         from .dashboard import run_dashboard
         return run_dashboard(args)

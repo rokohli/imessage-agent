@@ -21,4 +21,6 @@ export interface components {schemas: {
 "Settings": {"model"?: string; "timezone"?: string; "grace"?: number; "notifications"?: boolean};
 "Summary": {"upcoming_count": number; "upcoming": (components['schemas']["Occurrence"])[]; "pending_approvals": number; "saved_drafts": number; "recent_attempts": (components['schemas']["AttemptView"])[]; "scheduler": string};
 "ValidationError": {"loc": (string | number)[]; "msg": string; "type": string; "input"?: unknown; "ctx"?: {}};
+"WorkerError": {"timestamp": number; "category": string};
+"WorkerHealth": {"status": string; "heartbeat": number | null; "last_poll": number | null; "pending_count": number; "next_execution": number | null; "recent_errors": (components['schemas']["WorkerError"])[]; "last_outcome": string | null; "transport": string | null};
 }}

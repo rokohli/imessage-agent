@@ -181,3 +181,14 @@ with explicit authorization and document physical macOS evidence. Validate the
 real Messages permissions/account setup and local Ollama model on the operator's
 Mac; synthetic tests do not prove live compatibility or style quality. Autonomous
 replies and automatic UNKNOWN retry remain disabled. No Phase 6 executor is added.
+
+## Phase 6 update
+
+Background execution is now available through explicit per-user LaunchAgent
+installation. Overview and Settings show fresh worker status, heartbeat, last
+successful poll, next execution and recent errors through `/api/worker`.
+The existing notifications preference now controls private native event banners;
+OS notification authorization is separate. No dashboard route starts a process.
+See [the background agent runbook](background-agent.md) for exact commands and
+manual acceptance checks. The earlier "Before Phase 6" section describes the
+Phase 5 boundary; it is superseded by that runbook.

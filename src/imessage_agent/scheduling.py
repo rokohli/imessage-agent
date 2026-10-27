@@ -259,7 +259,7 @@ class Scheduler:
             'LEFT JOIN send_attempts a ON a.id=o.id WHERE (? IS NULL OR o.plan_id=?) ORDER BY o.send_at,o.id',
             (plan_id, plan_id))]
 
-    def tick(self, *, dry_run=True, live=False, limit=100, plan_id=None):
+    def tick(self, *, dry_run=True, live=False, limit=100, plan_id=None, should_stop=None):
         if type(limit) is not int or not 1 <= limit <= 1000:
             raise SchedulingError('invalid_worker_limit')
         if plan_id is not None:
@@ -273,6 +273,8 @@ class Scheduler:
                 (now, plan_id, plan_id, limit))]
         active_ids = []
         for plan in self.plans():
+            if should_stop and should_stop():
+                break
             if plan['status'] == 'active' and (plan_id is None or plan['id'] == plan_id):
                 _, spec = verified_plan(self.store.connection, plan['id'])
                 if spec['transport'] == ('live' if live else 'mock'):
@@ -284,6 +286,8 @@ class Scheduler:
         db = self.store.connection
         results = []
         for _ in range(limit):
+            if should_stop and should_stop():
+                break
             now = self.clock()
             with db:
                 db.execute('BEGIN IMMEDIATE')

@@ -390,3 +390,13 @@ PYTHONPATH=src .venv/bin/python -m imessage_agent dashboard
 cd dashboard && npm install && npm run dev
 # Open http://127.0.0.1:5173
 ```
+
+## Phase 6 background agent
+
+An explicit per-user LaunchAgent now runs the existing scheduler independently of
+Terminal and the dashboard. It defaults to mock schedules, preserves durable
+UNKNOWN suppression and grace windows, and adds private native notifications,
+rotating structured logs and fresh worker health in the dashboard.
+See [background installation, management and supervised validation](docs/background-agent.md).
+Nothing installs or activates automatically; live-message validation requires your
+explicit confirmation. The Mac must be awake with an appropriate Messages session.

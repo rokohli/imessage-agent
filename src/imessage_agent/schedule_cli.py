@@ -108,8 +108,8 @@ def run_command(args):
                 connection.execute('PRAGMA query_only=ON')
                 connection.execute('PRAGMA trusted_schema=OFF')
                 store = SimpleNamespace(connection=connection, close=connection.close)
-                if connection.execute('PRAGMA user_version').fetchone()[0] not in (4, 5):
-                    raise SchedulingError('scheduler_schema_v4_or_v5_required')
+                if connection.execute('PRAGMA user_version').fetchone()[0] not in (4, 5, 6):
+                    raise SchedulingError('scheduler_schema_v4_to_v6_required')
             else:
                 store = Store(state)
             scheduler = Scheduler(store)

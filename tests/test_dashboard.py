@@ -199,7 +199,7 @@ class DashboardTests(unittest.TestCase):
         legacy.chmod(0o600)
         upgraded = Store(legacy)
         try:
-            self.assertEqual(upgraded.connection.execute('PRAGMA user_version').fetchone()[0], 5)
+            self.assertEqual(upgraded.connection.execute('PRAGMA user_version').fetchone()[0], 6)
             self.assertEqual(upgraded.approval('old').payload_hash, 'hash')
             self.assertEqual(upgraded.connection.execute('SELECT COUNT(*) FROM dashboard_preferences').fetchone()[0], 0)
         finally:

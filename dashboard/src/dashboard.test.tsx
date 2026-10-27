@@ -14,6 +14,7 @@ import { ScheduleForm, validateSchedule } from "./ScheduleForm";
 import { App } from "./main";
 vi.mock("./api", () => ({
   api: {
+    worker: vi.fn(),
     summary: vi.fn(),
     health: vi.fn(),
     schedules: vi.fn(),
@@ -54,6 +55,7 @@ const settings = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(api.worker).mockResolvedValue({status: "stopped", heartbeat: null, last_poll: null, pending_count: 0, next_execution: null, recent_errors: [], last_outcome: null, transport: null});
   vi.mocked(api.settings).mockResolvedValue(settings);
   vi.mocked(api.accounts).mockResolvedValue({
     selected: null,
@@ -292,4 +294,16 @@ it("sidebar routes render and appearance toggles", async () => {
   expect(
     screen.getByRole("button", { name: "☀ Light appearance" }),
   ).toBeInTheDocument();
+});
+
+
+it("shows stale worker attention, heartbeat, next execution and sanitized errors", async () => {
+  vi.mocked(api.worker).mockResolvedValue({status: "attention", heartbeat: 1, last_poll: 1, pending_count: 2, next_execution: 100, recent_errors: [{timestamp: 2, category: "sqlite_unavailable"}], last_outcome: "unknown", transport: "mock"});
+  const { WorkerPanel } = await import("./pages");
+  render(<WorkerPanel />);
+  expect(await screen.findByText("attention")).toBeInTheDocument();
+  expect(screen.getByText(/Last heartbeat:/)).toBeInTheDocument();
+  expect(screen.getByText(/Next execution:/)).toBeInTheDocument();
+  expect(screen.getByText(/sqlite unavailable/)).toBeInTheDocument();
+  expect(screen.getByText(/Last outcome: unknown/)).toBeInTheDocument();
 });

@@ -48,6 +48,7 @@ export async function request<T>(
   return response.json() as Promise<T>;
 }
 export const api = {
+  worker: () => request<components["schemas"]["WorkerHealth"]>("/worker"),
   summary: () => request<Summary>("/summary"),
   health: () => request<Health>("/health"),
   schedules: () => request<Schedule[]>("/schedules"),

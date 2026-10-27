@@ -182,3 +182,20 @@ disabled. An explicitly configured Messages source is read-only and used for
 verified regeneration/diagnostics. Private content is returned at runtime only,
 not built into JavaScript. Local processes and browser users remain trusted.
 See [the runbook](docs/local-dashboard.md) for the full boundary and limitations.
+
+## Phase 6 background boundary
+
+The background worker adds no outbound authority: it executes only matching
+previously authorized Phase 4 schedules through the existing scheduler and
+transport. An OS lock serializes background processes per canonical state path;
+atomic occurrence/attempt claims remain the send safety boundary. UNKNOWN is
+never reclaimed. SQLite/transient recovery retries polls, not reserved dispatches.
+SIGTERM stops new occurrences and allows the bounded current dispatch to finish.
+The dashboard exposes read-only worker health and the existing notification
+preference, with no shell or start/stop endpoint. Fresh health requires both a held
+lock and recent heartbeat/successful poll. User-owned bounded logs and notifications
+contain fixed categories and opaque IDs, never message/recipient/account data.
+Native notification permission is requested only by the explicit management
+command. Install/start/uninstall are local CLI operations, never import side effects.
+The per-user Aqua LaunchAgent defaults to mock, needs no sudo, and starts neither
+Ollama nor dashboard. Operational macOS/TCC/notification proof remains supervised.

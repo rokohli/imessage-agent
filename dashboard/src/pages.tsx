@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type Draft, type Schedule, type Settings } from "./api";
 import {
@@ -13,6 +13,49 @@ import {
   useData,
 } from "./ui";
 import { ScheduleForm } from "./ScheduleForm";
+
+export function WorkerPanel() {
+  const state = useData(api.worker);
+  useEffect(() => {
+    const timer = window.setInterval(() => void state.refresh(), 10000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <Card title="Background worker">
+      <LoadState {...state} retry={state.refresh} />
+      {state.data && (
+        <>
+          <div className="list-row">
+            <span>Worker</span>
+            <Status value={state.data.status} />
+          </div>
+          <p>Transport: {state.data.transport ?? "Not configured"}</p>
+          <p>Last heartbeat: {state.data.heartbeat === null ? "Never" : time(state.data.heartbeat)}</p>
+          <p>Last successful poll: {state.data.last_poll === null ? "Never" : time(state.data.last_poll)}</p>
+          <p>Next execution: {state.data.next_execution === null ? "None materialized" : time(state.data.next_execution)}</p>
+          <p>Pending occurrences: {state.data.pending_count}</p>
+          <p>Last outcome: {state.data.last_outcome ?? "None"}</p>
+          {state.data.recent_errors.map((e, i) => (
+            <p key={i} role="status">
+              {time(e.timestamp)} · {e.category.replaceAll("_", " ")}
+            </p>
+          ))}
+        </>
+      )}
+      <p className="note">
+        Enable from Terminal once: run the LaunchAgent install command with your
+        existing state path, then start it. Add --execute-live at installation only
+        when you authorize execution of existing live schedules. See
+        docs/background-agent.md for exact commands. The Mac must be awake with a
+        Messages user session available.
+      </p>
+      <p className="note">
+        Running requires a held worker lock, a fresh heartbeat and a fresh
+        successful poll. Ollama is optional. UNKNOWN outcomes are never retried.
+      </p>
+    </Card>
+  );
+}
 
 export function Overview() {
   const state = useData(api.summary);
@@ -29,6 +72,7 @@ export function Overview() {
           ＋ Schedule Message
         </Link>
       </div>
+      <WorkerPanel />
       <LoadState {...state} retry={state.refresh} />
       {state.data && (
         <>
@@ -91,8 +135,7 @@ export function Overview() {
                 </>
               )}
               <p className="note">
-                Worker status is not monitored. Run the Phase 4 foreground
-                worker separately to execute schedules.
+                Background execution is managed separately through the per-user LaunchAgent.
               </p>
               <Link to="/settings">Service settings ↗</Link>
             </Card>
@@ -764,6 +807,7 @@ export function SettingsPage() {
           Settings saved locally.
         </p>
       )}
+      <WorkerPanel />
       <div className="two-col">
         <Card title="Application preferences">
           {state.data && (
@@ -806,11 +850,10 @@ export function SettingsPage() {
                     type="checkbox"
                     defaultChecked={state.data.notifications}
                   />{" "}
-                  Notifications preference for Phase 6
+                  Private macOS notifications
                 </label>
                 <p className="note">
-                  Preferences apply to new schedules. Notifications are not
-                  delivered yet.
+                  Schedule defaults apply to new schedules. Notification changes apply on the next worker poll. Install the helper and grant notification permission using the runbook.
                 </p>
                 <button className="primary">
                   {busy ? "Saving…" : "Save preferences"}
