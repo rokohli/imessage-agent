@@ -11,7 +11,7 @@ Run in the same macOS terminal/host and installed Python context you intend to
 use for a later separately authorized supervised test:
 
 ```sh
-cd /Users/rohankohli/imessage-agent
+cd /path/to/imessage-agent
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH="$PWD/src"
 /opt/anaconda3/bin/python3 -m imessage_agent setup-imessage-account
@@ -149,7 +149,7 @@ Run manually from the project root, after separately authorizing one consenting
 recipient and one NEW test message:
 
 ```sh
-cd /Users/rohankohli/imessage-agent
+cd /path/to/imessage-agent
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH="$PWD/src"
 OUTBOUND_STATE="$HOME/.local/state/imessage-agent-validation/outbound-test.sqlite3"

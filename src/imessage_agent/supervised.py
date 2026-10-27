@@ -17,7 +17,7 @@ from .applescript import AppleScriptMessagesAdapter, _literal, diagnose_applescr
 from .models import Contact, Recipient, SendStatus, payload_hash
 from .outbound import Outbound
 from .smoke import _schema
-from .storage import Store, _SCHEMA, _OUTBOUND_SCHEMA
+from .storage import Store, _SCHEMA, _OUTBOUND_SCHEMA, _DRAFT_SCHEMA
 
 
 class SupervisedError(Exception):
@@ -42,8 +42,9 @@ def _existing_state(path: Path, recipient: Recipient, body: str) -> Path:
         connection.execute("PRAGMA query_only=ON")
         connection.execute("PRAGMA trusted_schema=OFF")
         with closing(sqlite3.connect(":memory:")) as expected:
-            expected.executescript(_SCHEMA + _OUTBOUND_SCHEMA)
-            if connection.execute("PRAGMA user_version").fetchone()[0] != 2 or _schema(connection) != _schema(expected):
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            expected.executescript(_SCHEMA + _OUTBOUND_SCHEMA + (_DRAFT_SCHEMA if version == 3 else ""))
+            if version not in (2, 3) or _schema(connection) != _schema(expected):
                 raise SupervisedError("unrecognized_outbound_state")
         if not connection.execute("SELECT 1 FROM send_attempts WHERE status='unknown' LIMIT 1").fetchone():
             raise SupervisedError("prior_unknown_history_missing")

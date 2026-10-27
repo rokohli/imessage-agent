@@ -288,6 +288,6 @@ class ControlledOutboundTests(unittest.TestCase):
         store = Store(path)
         try:
             self.assertEqual(store.cursor("fictional").sequence, 70)
-            self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 3)
         finally:
             store.close()

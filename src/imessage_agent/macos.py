@@ -87,6 +87,7 @@ class MacOSMessagesReader:
             if not needed <= columns[table]:
                 raise MessagesAccessError("unsupported_schema")
         self._message_columns = columns["message"]
+        self._chat_columns = columns["chat"]
         self._chat_column = next((name for name in ("guid", "chat_identifier") if name in columns["chat"]), None)
         if self._chat_column is None or not {"text", "attributedBody"} & self._message_columns:
             raise MessagesAccessError("unsupported_schema")
@@ -139,6 +140,80 @@ class MacOSMessagesReader:
         finally:
             self._connection.rollback()
 
+    def read_before(self, sequence: int | None, limit: int, *, chat_id: str | None = None) -> Batch:
+        """Page backward through individual chats, returning ascending ROWIDs.
+
+        Unlike ingestion, sampling may skip groups in SQL. None starts at the
+        newest row; a sequence is an exclusive upper bound for older context.
+        """
+        if sequence is not None and (type(sequence) is not int or sequence < 0):
+            raise ValueError("sequence must be None or a non-negative integer")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        if self._connection is None:
+            raise MessagesAccessError("reader_closed")
+        try:
+            self._check_identity()
+            self._connection.execute("BEGIN")
+            optional = ("text", "attributedBody", "item_type", "is_system_message", "associated_message_type")
+            fields = ",".join(f'm."{name}"' if name in self._message_columns else f'NULL AS "{name}"' for name in optional)
+            boundary = "m.ROWID<?" if sequence is not None else "1"
+            style = "AND c.style=45" if "style" in self._chat_columns else ""
+            chat_filter = f'AND c."{self._chat_column}"=?' if chat_id is not None else ""
+            parameters = ((sequence,) if sequence is not None else ()) + ((chat_id,) if chat_id is not None else ()) + (limit,)
+            rows = self._connection.execute(
+                f"SELECT m.ROWID AS sequence,m.guid,m.date,m.is_from_me,h.id AS sender,{fields} "
+                "FROM message m LEFT JOIN handle h ON h.ROWID=m.handle_id "
+                f"WHERE {boundary} AND EXISTS ("
+                "SELECT 1 FROM chat_message_join j JOIN chat c ON c.ROWID=j.chat_id "
+                "WHERE j.message_id=m.ROWID AND "
+                "(SELECT COUNT(*) FROM chat_handle_join x WHERE x.chat_id=c.ROWID)=1 "
+                f"{style} {chat_filter}) ORDER BY m.ROWID DESC LIMIT ?", parameters,
+            ).fetchall()
+            messages = tuple(self._message(row) for row in reversed(rows))
+            self._check_identity()
+            return Batch(self.source_id, self.generation, messages)
+        except MessagesAccessError:
+            raise
+        except (OSError, sqlite3.Error, ValueError, TypeError, OverflowError):
+            raise MessagesAccessError("read_failed_or_invalid_record") from None
+        finally:
+            self._connection.rollback()
+
+    def individual_chats(self) -> dict[str, Recipient]:
+        """Exact one-handle chats only; missing membership schema fails closed."""
+        if self._connection is None:
+            raise MessagesAccessError("reader_closed")
+        try:
+            self._check_identity()
+            kind = self._connection.execute(
+                "SELECT type FROM sqlite_master WHERE name='chat_handle_join'"
+            ).fetchone()
+            if kind is None or kind[0] != "table":
+                raise MessagesAccessError("individual_chat_membership_unavailable")
+            style = "AND c.style=45" if "style" in self._chat_columns else ""
+            rows = self._connection.execute(
+                f'SELECT c."{self._chat_column}" AS chat,h.id AS address FROM chat c '
+                'JOIN chat_handle_join j ON j.chat_id=c.ROWID '
+                'JOIN handle h ON h.ROWID=j.handle_id '
+                'WHERE (SELECT COUNT(*) FROM chat_handle_join x WHERE x.chat_id=c.ROWID)=1 '
+                f'{style}'
+            ).fetchall()
+            result = {}
+            ambiguous = set()
+            for row in rows:
+                try:
+                    recipient = Recipient.parse(row["address"])
+                except (ValueError, TypeError, UnicodeError):
+                    continue
+                if row["chat"] in result:
+                    ambiguous.add(row["chat"])
+                result[row["chat"]] = recipient
+            self._check_identity()
+            return {chat: recipient for chat, recipient in result.items() if chat not in ambiguous}
+        except (sqlite3.Error, OSError):
+            raise MessagesAccessError("individual_chat_membership_unavailable") from None
+
     def _message(self, row: sqlite3.Row) -> Message:
         guid = row["guid"]
         if not isinstance(guid, str) or not guid.strip():
@@ -178,4 +253,6 @@ class MacOSMessagesReader:
         # shortcut: Apple epoch seconds or nanoseconds inferred by magnitude;
         # add an explicit schema variant if Apple introduces another date unit.
         occurred_at = date / 1_000_000_000 if abs(date) >= 100_000_000_000 else date
-        return Message(row["sequence"], guid, chat_id, direction, sender, body, occurred_at + 978307200)
+        return Message(row["sequence"], guid, chat_id, direction, sender, body, occurred_at + 978307200,
+                       is_service=any(row[name] not in (None, 0) for name in
+                                      ("item_type", "is_system_message", "associated_message_type")))

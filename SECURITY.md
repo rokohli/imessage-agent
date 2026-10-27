@@ -3,8 +3,8 @@
 ## Current scope
 
 The foundation has explicit-path read-only ingestion and a disabled-by-default
-text-only AppleScript adapter. There is no AI client, automatic reply engine,
-background worker. The only sending CLI is the interactive supervised test,
+text-only AppleScript adapter. Phase 3A adds a local-only Ollama draft client,
+with no automatic sending or background worker. The only sending CLI is the interactive supervised test,
 which requires existing UNKNOWN history, NEW text and explicit one-shot confirmation. The factory remains mock-only. Only trusted
 local code may explicitly enable the real adapter through `Outbound`; neither
 environment variables nor development mode enable it. No real sends or permission
@@ -91,3 +91,57 @@ ROWIDs and changes below the cursor require future reconciliation. Read-only
 manual validation and exact permission/executable guidance are documented in
 [docs/macos-validation.md](docs/macos-validation.md). No broad access is requested
 by the package; do not grant it to an AI agent as part of validation.
+
+
+## Local drafting boundary
+
+Phase 3A uses only direct HTTP to `127.0.0.1:11434`, without proxies, redirects,
+cloud fallback, tools, model pulls, or external API calls. Remote-model metadata
+and cloud-tagged names are rejected before history is submitted. Run a trusted
+Ollama daemon with `OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1`; the client cannot
+prove a local daemon's implementation or listening interfaces. See the listener
+checks in [the runbook](docs/local-drafting.md).
+
+Style profiles and drafts contain filtered plaintext examples, exact recipient
+keys, and source references in mode-0600 agent state. Draft commands reuse source,
+sidecar, symlink, ownership and outside-checkout state-path checks. They do not
+copy raw history into the inbox or alter cursors. English regex filtering drops
+sensitive-looking examples and redacts context but can miss novel secrets and
+non-English content. This is data minimization, not comprehensive sanitization.
+
+Model output is untrusted. Claim review rejects credentials and malformed/meta
+output, holds clear personal claims/commitments for approval, and uses a separate
+schema-constrained local model check for ambiguous wording. Unknown/failed checks
+require approval; they do not discard otherwise reviewable text or grant sending
+rights. Natural-language acceptance does not broaden the existing narrow advisory
+eligibility predicate. Both rules and the local model can misclassify claims.
+Private draft JSON can now retain unverified personal claims for human correction;
+these must not be treated as established facts. No model can create an approval.
+Every
+classification is preview-only, including `AUTO_SEND_ELIGIBLE`; no classification
+creates an approval or reaches `Outbound`. There is no draft-to-send CLI. Existing
+supervised send rules remain mandatory for independently authored, authorized text.
+
+Held-out evaluation rebuilds profiles from preceding messages only and returns
+aggregate heuristic scores without raw history, reference replies or identifiers.
+Terminal draft content requires `--show-text`. No raw provider exceptions are
+printed. Ollama or other same-user processes can log locally; protect their
+configuration and keep private state out of cloud synchronization and backups.
+
+
+## Opt-in human evaluation review
+
+`review-drafts` requires `--show-text` and terminal stdin/stdout before source
+access. It intentionally reveals private context, the candidate and actual
+held-out text to the local owner, and stores snapshots/ratings in a dedicated
+mode-0600 SQLite file outside the checkout. This is plaintext personal data;
+keep it outside sync/backups and never attach it to issue reports. Terminal
+controls/bidi overrides are escaped. Resume opens no Messages content or model.
+
+The review file is distinct from core/profile/outbound state and is schema-checked
+before writes. Review paths reuse source/sidecar, symlink, hardlink, ownership and
+private-file checks. Human ratings cannot change contacts, approvals, attempts,
+profiles, model instructions or auto-sending. Context hydration and retrieval use
+only verified recipient/chat identities and precede each target; held-out replies
+are disclosed to the human only after model calls and are never fed into their
+own generation or claim review. Human/heuristic aggregates remain separate.

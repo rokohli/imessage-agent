@@ -86,6 +86,7 @@ class Message:
     sender: Recipient | None
     body: str | None
     occurred_at: float
+    is_service: bool = False
 
     def __post_init__(self) -> None:
         import math
@@ -102,6 +103,8 @@ class Message:
             raise ValueError("body must be text or None")
         if not math.isfinite(self.occurred_at):
             raise ValueError("message timestamp must be finite")
+        if type(self.is_service) is not bool:
+            raise ValueError("service metadata flag must be boolean")
 
 
 @dataclass(frozen=True)

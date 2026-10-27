@@ -2,14 +2,22 @@
 
 A local-first Python messaging foundation with read-only macOS ingestion and a
 controlled text-only AppleScript transport. Sending defaults to disabled in every
-environment; the factory remains synthetic. No AI client, automatic replies or
-background worker is included. Importing performs no I/O. Real sending requires
+environment; the factory remains synthetic. Phase 3A includes local Ollama drafting
+and human evaluation. Automatic replies and background sending remain disabled.
+Importing performs no I/O. Real sending requires
 separate authorization and explicit trusted in-process enablement.
 
 The long-term goal is a local-first macOS agent with secure auto-replies, human
-approval, and randomized scheduling. Those user-facing capabilities are planned,
-not operational. This repository provides durable ingestion and policy primitives;
-it does not generate replies.
+approval, and randomized scheduling. Draft generation is preview-only; human ratings do not authorize sending.
+Scheduling execution is the next phase.
+
+Phase 3A status: personalized general/contact profiles, conversation-aware retrieval,
+claim review, punctuation policy, human review and fixed-case blind comparison are
+implemented. Default: `qwen2.5:3b`, loopback Ollama, temperature 0.3, 160 output
+tokens. **256 offline tests pass** (2026-10-27). The owner-reported 20-case baseline
+had style 2.0/5, relevance 2.1/5, naturalness 1.9/5 and 0/20 observed inventions;
+post-improvement quality is unmeasured. See the [evaluation report](docs/phase3a-evaluation-report.md).
+Autonomous replies remain disabled.
 
 ## Current features
 
@@ -98,9 +106,12 @@ read-only source -> durable inbox -> untrusted context -> draft proposal
 trusted local policy/approval -> durable attempt claim -> messaging adapter
 ```
 
-There is currently no model or AI tool interface. A future model should receive
-only selected context and propose drafts. Never give it arbitrary Python, direct
-SQLite access, contact administration, approval creation, or a raw dispatch tool.
+Phase 3A adds a local-only Ollama draft generator (default `qwen2.5:3b`). It gets
+filtered style examples and preceding context, with no tools or dispatch access.
+See [local drafting and evaluation commands](docs/local-drafting.md) and the
+[evaluation report](docs/phase3a-evaluation-report.md). Draft classifications never
+grant an approval or enable auto-sending. Never give a model arbitrary Python,
+direct SQLite access, contact administration, approval creation, or raw dispatch.
 Python module privacy is not a security sandbox: trusted code with this process's
 privileges can bypass its APIs. The policy boundary needs a separate process or
 equivalent capability restriction before any untrusted execution is introduced.
@@ -315,3 +326,41 @@ is not a runtime dependency and is not modified by this project.
 
 Distributed under the [MIT license](LICENSE), including the retained upstream
 copyright and permission notice.
+
+
+## Phase 3A local drafting
+
+`model-health`, `build-profiles`, `draft-preview`, `evaluate-drafts`, `compare-drafts`,
+and the opt-in `review-drafts` command implement
+private local style imitation and held-out evaluation. The read-only adapter must
+verify individual chat membership; filtered outgoing messages form general and
+per-recipient style profiles. Recent context and representative prior replies
+stay on the same machine. Ollama is required at `127.0.0.1:11434`; remote/cloud
+models, proxies, redirects, and provider fallbacks are not used. No new dependency
+is required.
+
+Drafts and source references are saved in private agent state. No draft sends,
+creates approvals, or changes recipient permissions. Claim-based content review
+accepts natural reactions and clarification, retains unverified personal claims
+for approval, and discards credentials or broken output. Ambiguous wording gets
+a separate local model review. Missing personal facts or decisions are marked
+`NEEDS_USER_INPUT`; sending still requires the existing approval flow. Sensitive filtering is heuristic,
+not a guarantee that all private content will be recognized.
+
+See [the runbook](docs/local-drafting.md) for exact setup, health check, profile,
+preview, comparison and offline-test commands. Personal history and model quality
+were not validated during implementation; the report distinguishes mocked checks
+from measured local-model performance.
+
+`compare-drafts` freezes the exact 20 cases from an existing review, generates the
+punctuation-fixed 3B baseline and improved 3B pipeline, and adds improved 7B only
+if already installed locally. A separate private file shuffles trials for blind
+rating; completed reviews report human quality, invention labels, heuristics and
+latency separately. See [the fixed-case comparison commands](docs/human-review.md#blind-comparison-on-the-same-20-saved-cases).
+
+
+[Human quality review](docs/human-review.md) shows private held-out comparisons
+and saves style/relevance/naturalness ratings plus invention labels in a separate
+local review file. It reports human quality independently of heuristic scores and
+content-acceptance rates. Resume uses saved snapshots without regenerating drafts.
+Ratings never grant sending approval or turn on autonomous replies.

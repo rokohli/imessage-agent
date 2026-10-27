@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .ingestion import ingest_once
 from .macos import MacOSMessagesReader, MessagesAccessError
-from .storage import Store, _SCHEMA, _OUTBOUND_SCHEMA
+from .storage import Store, _SCHEMA, _OUTBOUND_SCHEMA, _DRAFT_SCHEMA
 
 
 class SmokeError(Exception):
@@ -103,13 +103,16 @@ def run(database: Path, state: Path, *, commit: bool = False, limit: int = 10, r
                         existing.execute("PRAGMA trusted_schema=OFF")
                         version = existing.execute("PRAGMA user_version").fetchone()[0]
                         with closing(sqlite3.connect(":memory:")) as expected:
-                            expected.executescript(_SCHEMA + (_OUTBOUND_SCHEMA if version == 2 else ""))
-                            if version not in (1, 2) or _schema(existing) != _schema(expected):
+                            expected.executescript(_SCHEMA + (_OUTBOUND_SCHEMA if version >= 2 else "")
+                                                   + (_DRAFT_SCHEMA if version == 3 else ""))
+                            if version not in (1, 2, 3) or _schema(existing) != _schema(expected):
                                 raise SmokeError("unrecognized_state")
                         if not commit:
                             existing.backup(temporary.connection)
                             if version == 1:
                                 temporary.connection.executescript("BEGIN IMMEDIATE;" + _OUTBOUND_SCHEMA + "COMMIT;")
+                            if version < 3:
+                                temporary.connection.executescript("BEGIN IMMEDIATE;" + _DRAFT_SCHEMA + "COMMIT;")
                 # Open the source before creating persistent state, so access errors leave no new DB.
                 with MacOSMessagesReader(database) as reader:
                     store = Store(state) if commit else temporary

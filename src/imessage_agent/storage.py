@@ -89,6 +89,29 @@ PRAGMA user_version = 2;
 """
 
 
+_DRAFT_SCHEMA = """
+CREATE TABLE style_profiles (
+    source_id TEXT NOT NULL,
+    generation TEXT NOT NULL,
+    profile_key TEXT NOT NULL,
+    cutoff INTEGER NOT NULL,
+    profile_json TEXT NOT NULL,
+    PRIMARY KEY(source_id, profile_key)
+);
+CREATE TABLE reply_drafts (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    generation TEXT NOT NULL,
+    source_guid TEXT NOT NULL,
+    source_sequence INTEGER NOT NULL,
+    recipient_key TEXT NOT NULL,
+    draft_json TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+PRAGMA user_version = 3;
+"""
+
+
 def _identifier(value: str) -> None:
     if not isinstance(value, str) or not value.strip() or len(value) > 128:
         raise ValueError("identifiers must contain 1 to 128 characters")
@@ -130,8 +153,10 @@ class Store:
                 self.connection.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA + _OUTBOUND_SCHEMA + "\nCOMMIT;")
             elif version == 1:
                 self.connection.executescript("BEGIN IMMEDIATE;\n" + _OUTBOUND_SCHEMA + "\nCOMMIT;")
-            elif version != 2:
+            elif version not in (2, 3):
                 raise ValueError("unsupported agent schema version")
+            if version != 3:
+                self.connection.executescript("BEGIN IMMEDIATE;\n" + _DRAFT_SCHEMA + "\nCOMMIT;")
         except BaseException:
             self.connection.close()
             raise

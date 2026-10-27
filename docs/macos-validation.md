@@ -74,7 +74,7 @@ project; choose a different private, nonsynced location if needed. No permission
 are changed by these commands.
 
 ```sh
-cd /Users/rohankohli/imessage-agent
+cd /path/to/imessage-agent
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH="$PWD/src"
 SMOKE_DATABASE='/authorized/path/chat.db'

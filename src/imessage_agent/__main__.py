@@ -1,4 +1,4 @@
-"""Content-free diagnostics and an explicitly confirmed, supervised one-shot test."""
+"""Local drafting, content-free diagnostics and a separately supervised send test."""
 
 import argparse
 import getpass
@@ -14,6 +14,7 @@ from .macos import MacOSMessagesReader, MessagesAccessError
 from .smoke import SmokeError, run
 from .validation import validate_classification
 from .supervised import send_one_supervised
+from .draft_cli import COMMANDS, add_commands, run_command
 
 
 class SafeParser(argparse.ArgumentParser):
@@ -82,7 +83,10 @@ def main(argv=None) -> int:
     commands.add_parser("setup-imessage-account", help="Select and privately save a verified iMessage account; no send")
     supervised = commands.add_parser("send-supervised-test", help="LIVE: one manually confirmed NEW iMessage, no retries")
     supervised.add_argument("--state", type=Path, required=True, help="Existing outbound state containing the prior UNKNOWN")
+    add_commands(commands)
     args = parser.parse_args(argv)
+    if args.command in COMMANDS:
+        return run_command(args)
     if args.command == "send-supervised-test":
         report = send_one_supervised(args.state)
         print(json.dumps(report, sort_keys=True))
