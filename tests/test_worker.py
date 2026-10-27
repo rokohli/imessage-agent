@@ -330,6 +330,63 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.scheduler.history(plan)[0]['status'], 'accepted')
         self.assertNotIn('SECRET', self.output.getvalue())
 
+    def test_notification_failures_coalesce_until_presentation_recovers(self):
+        from datetime import datetime, timezone
+        self.enable()
+        plan = self.create()
+        self.now += 61
+        self.notify.side_effect = OSError('helper unavailable')
+        self.worker.poll(self.store)
+        for _ in range(6):
+            if self.worker.presentation:
+                self.worker.presentation.result(timeout=2)
+            self.now += 10
+            self.worker.poll(self.store)
+        self.assertEqual(self.worker.health['error'], 'notification_unavailable')
+        # Only one attention entry recorded for notification_unavailable, not crowded out across polls.
+        notification_errors = [e for e in self.worker.health['recent_errors']
+                               if e['category'] == 'notification_unavailable']
+        self.assertEqual(len(notification_errors), 1)
+        # Durable notifications table does not grow indefinitely per poll.
+        rows = self.store.connection.execute('SELECT COUNT(*) FROM worker_notifications').fetchone()[0]
+        self.assertEqual(rows, 2)  # 1 for occurrence, 1 for attention event
+        self.assertEqual(self.notify.call_count, 2)
+
+        # Presentation recovers on next event; error is cleared.
+        self.notify.side_effect = None
+        future = datetime.fromtimestamp(self.now + 60, timezone.utc)
+        spec = make_spec(self.recipient, 'recovered synthetic occurrence',
+                         start_date=future.date().isoformat(), start_time=future.time().isoformat(),
+                         timezone_name='UTC', grace=60)
+        self.scheduler.create(spec, authorized=True)
+        self.now += 61
+        self.worker.poll(self.store)
+        if self.worker.presentation:
+            self.worker.presentation.result(timeout=2)
+        self.now += 10
+        self.worker.poll(self.store)
+        self.assertIsNone(self.worker.health['error'])
+        self.assertFalse(self.worker.notification_failure)
+        with worker_lock(self.path):
+            self.assertEqual(worker_status(self.store, self.path, now=self.now)['status'], 'running')
+
+        # If notification failure occurs and then user disables notifications, error clears.
+        self.notify.side_effect = OSError('helper unavailable again')
+        future2 = datetime.fromtimestamp(self.now + 60, timezone.utc)
+        spec2 = make_spec(self.recipient, 'second occurrence',
+                          start_date=future2.date().isoformat(), start_time=future2.time().isoformat(),
+                          timezone_name='UTC', grace=60)
+        self.scheduler.create(spec2, authorized=True)
+        self.now += 61
+        self.worker.poll(self.store)
+        if self.worker.presentation:
+            self.worker.presentation.result(timeout=2)
+        self.worker.poll(self.store)
+        self.assertEqual(self.worker.health['error'], 'notification_unavailable')
+        self.enable(False)
+        self.worker.poll(self.store)
+        self.assertIsNone(self.worker.health['error'])
+
     def test_health_needs_lock_and_fresh_poll_not_only_heartbeat(self):
         self.worker.poll(self.store)
         self.assertEqual(worker_status(self.store, self.path, now=self.now)['status'], 'stopped')

@@ -131,6 +131,7 @@ class Worker:
         self.notify = notify
         self.presenter = ThreadPoolExecutor(max_workers=1)
         self.presentation = None
+        self.notification_failure = False
         self.health = dict(heartbeat=None, last_poll=None, error=None, recent_errors=[],
                            transport='live' if live else 'mock')
 
@@ -162,10 +163,19 @@ class Worker:
             if not self.presentation.done():
                 return  # One bounded batch in flight; keep polling schedules.
             if self.presentation.result():
+                self.notification_failure = True
                 self.attention('notification_unavailable')
+            else:
+                self.notification_failure = False
+                if self.health.get('error') == 'notification_unavailable':
+                    self.health['error'] = None
             self.presentation = None
         db = store.connection
         enabled = preference(db, 'settings', {}).get('notifications') is True
+        if not enabled and self.notification_failure:
+            self.notification_failure = False
+            if self.health.get('error') == 'notification_unavailable':
+                self.health['error'] = None
         # Persist observation before attempting presentation. Neither crashes nor delivery
         # failures trigger notification-driven retries or any message dispatch.
         rows = db.execute("SELECT o.id,o.plan_id,o.status FROM schedule_occurrences o "
@@ -202,7 +212,11 @@ class Worker:
         self.health['heartbeat'] = self.clock()
         save_health(store.connection, self.health)
         Scheduler(store, clock=self.clock).tick(dry_run=False, live=self.live, should_stop=self.stop.is_set)
-        self.health.update(last_poll=self.clock(), heartbeat=self.clock(), error=None)
+        self.health.update(last_poll=self.clock(), heartbeat=self.clock())
+        if self.notification_failure:
+            self.health['error'] = 'notification_unavailable'
+        else:
+            self.health['error'] = None
         self.notifications(store)
         save_health(store.connection, self.health)
 
