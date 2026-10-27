@@ -39,6 +39,8 @@ class WorkerTests(unittest.TestCase):
         self.scheduler = Scheduler(self.store, clock=lambda: self.now)
 
     def tearDown(self):
+        self.worker.stop.set()
+        self.worker.presenter.shutdown(wait=True)
         self.store.close()
         self.temp.cleanup()
 
@@ -231,11 +233,55 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.store.connection.execute('SELECT COUNT(*) FROM send_attempts').fetchone()[0], 1)
         self.assertNotIn('SECRET', self.output.getvalue())
 
+    def test_slow_notification_batch_does_not_expire_next_occurrence(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from datetime import datetime, timezone
+        self.enable()
+        for _ in range(5):
+            self.create()
+        future = datetime.fromtimestamp(NOW + 120, timezone.utc)
+        spec = make_spec(self.recipient, 'next synthetic occurrence',
+                         start_date=future.date().isoformat(), start_time=future.time().isoformat(),
+                         timezone_name='UTC', grace=60)
+        next_plan = self.scheduler.create(spec, authorized=True)
+        entered, release = threading.Event(), threading.Event()
+        presented = []
+        def slow_notify(event):
+            presented.append(event)
+            entered.set()
+            release.wait(5)
+        self.worker.notify = slow_notify
+        self.now = NOW + 61
+        # SQLite connection belongs to this caller; poll uses a fresh connection.
+        def first_poll():
+            store = Store(self.path)
+            try:
+                self.worker.poll(store)
+            finally:
+                store.close()
+        with ThreadPoolExecutor(max_workers=1) as caller:
+            poll = caller.submit(first_poll)
+            try:
+                self.assertTrue(entered.wait(2))
+                # Poll must finish while the native notification call is still blocked.
+                poll.result(timeout=1)
+                self.now = NOW + 121
+                self.worker.poll(self.store)
+                self.assertEqual(self.scheduler.history(next_plan)[0]['status'], 'accepted')
+                self.assertEqual(self.store.connection.execute(
+                    'SELECT COUNT(*) FROM worker_notifications').fetchone()[0], 5)
+            finally:
+                self.worker.stop.set()
+                release.set()
+        self.worker.presentation.result(timeout=2)
+        self.assertEqual(presented, ['accepted'])
+
     def test_notification_events_are_durable_and_private(self):
         self.enable()
         plan = self.create()
         self.now += 61
         self.worker.poll(self.store)
+        self.worker.presentation.result(timeout=2)
         self.worker.poll(self.store)
         self.notify.assert_called_once_with('accepted')
         self.assertNotIn(self.recipient.address, self.output.getvalue())
@@ -259,6 +305,7 @@ class WorkerTests(unittest.TestCase):
             reply='PRIVATE DRAFT', reason='review', auto_sending=False, dashboard_status='pending'))
         self.worker.attention('sqlite_unavailable')
         self.worker.notifications(self.store)
+        self.worker.presentation.result(timeout=2)
         self.assertEqual({c.args[0] for c in self.notify.call_args_list}, {'failed', 'unknown', 'missed', 'approval', 'attention'})
         self.assertNotIn('PRIVATE', self.output.getvalue())
         self.assertIn('unknown', EVENTS)
@@ -277,7 +324,9 @@ class WorkerTests(unittest.TestCase):
         self.now += 61
         self.notify.side_effect = OSError('SECRET path')
         self.worker.poll(self.store)
+        self.worker.presentation.result(timeout=2)
         self.worker.poll(self.store)
+        self.assertEqual(self.worker.health['error'], 'notification_unavailable')
         self.assertEqual(self.scheduler.history(plan)[0]['status'], 'accepted')
         self.assertNotIn('SECRET', self.output.getvalue())
 

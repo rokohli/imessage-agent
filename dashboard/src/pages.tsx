@@ -23,7 +23,7 @@ export function WorkerPanel() {
   return (
     <Card title="Background worker">
       <LoadState {...state} retry={state.refresh} />
-      {state.data && (
+      {state.data && !state.loading && !state.error && (
         <>
           <div className="list-row">
             <span>Worker</span>
@@ -874,7 +874,7 @@ export function SettingsPage() {
           }
         >
           <LoadState {...health} retry={health.refresh} />
-          {health.data &&
+          {health.data && !health.loading && !health.error &&
             Object.entries(health.data).map(([key, value]) => (
               <div className="list-row" key={key}>
                 <span>{key.replaceAll("_", " ")}</span>

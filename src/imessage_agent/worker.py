@@ -10,6 +10,7 @@ import sqlite3
 import stat
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -128,6 +129,8 @@ class Worker:
         self.interval, self.clock = interval, clock
         self.stop = threading.Event()
         self.notify = notify
+        self.presenter = ThreadPoolExecutor(max_workers=1)
+        self.presentation = None
         self.health = dict(heartbeat=None, last_poll=None, error=None, recent_errors=[],
                            transport='live' if live else 'mock')
 
@@ -142,8 +145,25 @@ class Worker:
                                         + self.health['recent_errors'])[:10]
         self.event('attention', error=category)
 
-    def notifications(self, store):
+    def present(self, outcomes):
         from .notifications import notify_native
+        failed = False
+        for outcome in outcomes:
+            if self.stop.is_set():
+                break
+            try:
+                (self.notify or notify_native)(outcome)
+            except Exception:
+                failed = True
+        return failed
+
+    def notifications(self, store):
+        if self.presentation is not None:
+            if not self.presentation.done():
+                return  # One bounded batch in flight; keep polling schedules.
+            if self.presentation.result():
+                self.attention('notification_unavailable')
+            self.presentation = None
         db = store.connection
         enabled = preference(db, 'settings', {}).get('notifications') is True
         # Persist observation before attempting presentation. Neither crashes nor delivery
@@ -160,7 +180,7 @@ class Worker:
                 events.append(('approval:' + row['id'] + ':' + revision, 'approval', None, None))
         for error in self.health['recent_errors']:
             events.append(('attention:' + error['category'] + ':' + str(error['timestamp']), 'attention', None, None))
-        presented = 0
+        outcomes = []
         for key, outcome, plan, occurrence in events:
             if self.stop.is_set():
                 break
@@ -172,13 +192,11 @@ class Worker:
             self.event('schedule_outcome' if occurrence else outcome,
                        schedule_id=plan, occurrence_id=occurrence, outcome=outcome)
             if enabled:
-                try:
-                    (self.notify or notify_native)(outcome)
-                except Exception:
-                    self.attention('notification_unavailable')
-                presented += 1
-                if presented == 5:
-                    break  # Bound presentation work so backlog banners cannot starve polling.
+                outcomes.append(outcome)
+                if len(outcomes) == 5:
+                    break
+        if outcomes:
+            self.presentation = self.presenter.submit(self.present, outcomes)
 
     def poll(self, store):
         self.health['heartbeat'] = self.clock()
@@ -219,6 +237,8 @@ class Worker:
                             store.close()
                     self.stop.wait(self.interval)
             finally:
+                self.stop.set()
+                self.presenter.shutdown(wait=True)
                 self.event('stopped')
         return 0
 

@@ -93,8 +93,11 @@ Notification observation is recorded durably *before* presentation. A crash or
 notification failure may lose a banner, never cause a resend. Old observed events
 are not replayed when notifications are enabled. Event keys survive restart and
 uninstall alongside send state; do not clear them to troubleshoot delivery.
-Worker attention errors are coalesced until the category changes or polling
-recovers. Failure to build the native helper prevents installation, leaving no
+Presentation runs on a separate thread with at most one five-event batch in
+flight. A slow helper cannot delay scheduler polls, and additional events stay
+unobserved until the current batch finishes. Shutdown skips queued presentations
+and waits only for the current bounded native call. Worker attention errors are
+coalesced until the category changes or polling recovers. Failure to build the native helper prevents installation, leaving no
 new plist. OS delivery from the LaunchAgent is a separate manual acceptance check.
 
 Apple references: [notification authorization](https://developer.apple.com/documentation/usernotifications/unusernotificationcenter/requestauthorization(options:completionhandler:))
@@ -112,7 +115,8 @@ Running requires the per-state OS lock, a heartbeat and successful scheduler pol
 no older than 90 seconds, and no current poll/notification error. Stale/future
 heartbeat, blocked poll or held lock without fresh health means **attention**.
 No lock means **stopped**, even if a heartbeat is recent. A failed health API read
-shows an error, never a healthy indicator. A historical failed send does not mean
+shows an error and hides the retained worker snapshot; pending refreshes also
+hide it until a fresh response arrives. A historical failed send does not mean
 the process stopped; review Recent errors and Activity. Pending/next values include
 all authorized transports; the displayed worker transport identifies what it will
 execute. Far-future recurring occurrences are materialized within Phase 4's
