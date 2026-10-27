@@ -1,4 +1,4 @@
-# Messaging and Phase 3A drafting architecture
+# Messaging, drafting and scheduling architecture
 
 Ingestion remains independent of sending:
 
@@ -9,7 +9,8 @@ trusted local approval + opt-in -> atomic dispatch claim -> enabled text transpo
 ```
 
 Phase 3A adds a preview-only local Ollama generator, independent of this sending
-path. There is no automatic send path, scheduler executor or background worker. The supervised send CLI requires interactive NEW text, fresh
+path. Phase 4 adds an explicitly authorized scheduler, with read-only and mock
+defaults; no AI reply worker is included. The supervised send CLI requires interactive NEW text, fresh
 approval, explicit one-shot confirmation and existing outbound UNKNOWN history. The factory still returns only the synthetic mock.
 Only an explicit `AppleScriptMessagesAdapter(enabled=True)` passed to `Outbound`
 can reach the macOS transport. No environment or development mode enables it.
@@ -95,8 +96,8 @@ Schema 2 adds only `outbound_claims`: attempt ID, generated-body hash and option
 source/GUID reply context. Existing contacts, messages, cursors, approvals and
 attempts are retained. Opening a v1 Store for writing upgrades it transactionally.
 Schema 3 adds only `style_profiles` and `reply_drafts`, retaining the outbound
-schema and all existing rows. Smoke dry runs/replay accept exact v1, v2 or v3
-schemas and migrate only a temporary copy. They never upgrade persistent state unless explicitly committed.
+schema and all existing rows. Schema 4 adds the separate plan/occurrence tables
+described below. Smoke dry runs/replay accept exact v1, v2, v3 or v4 schemas and migrate only a temporary copy. They never upgrade persistent state unless explicitly committed.
 
 Plaintext state, source read/WAL bookkeeping, temporary plaintext and trusted
 parent-directory limitations remain. Hashes bind payloads; they are not privacy
@@ -184,8 +185,8 @@ counts without text/identifiers; only accepted content earns heuristic credit.
 SQLite artifact. It reuses case selection, generation and claim validation,
 freezes snapshots before asking for feedback, and commits each valid human rating.
 Resume reads snapshots only; it never opens Messages content or calls a model.
-Ratings are neither profile training data nor outbound approvals. Core schema v3
-and its exact-schema outbound/smoke validators are unchanged.
+Ratings are neither profile training data nor outbound approvals. The review
+artifact remains separate from core state, now schema v4.
 
 `case_history` hydrates up to 12 real preceding messages with the reader's bounded
 chat-specific query; the same helper now grounds automated and human evaluation.
@@ -201,7 +202,7 @@ No hidden reply or human feedback enters a model request for that case. See
 
 `quality.py` filters known non-authored text and the optional `Message.is_service`
 source flag at the Phase 3A boundary. Raw ingestion retains direction/body and
-core schema v3; no source or saved-review migration occurs. Target selection resets
+the inbox schema; no source or saved-review migration occurs. Target selection resets
 on excluded artifacts. Generation deduplicates context/example payloads, omits
 irrelevant pair filler and explicitly targets the latest incoming turn. A copied
 safe outgoing statement can get one schema-constrained revision; all final text
@@ -218,3 +219,15 @@ is persisted before rating; labels, classification and timing are hidden until
 all available trials are rated. Failed cases remain visible in coverage. Both
 variants use the unchanged punctuation and claim checks. Only improved outcomes
 distinguish `NEEDS_USER_INPUT`; none can authorize a send.
+
+
+## Phase 4 scheduling
+
+[Smart scheduling](scheduling.md) adds schema v4 plan/occurrence tables, separate
+from legacy schedule primitives and AI drafting. Trusted authorization creates a
+frozen plan; deterministic recurrence dates create distinct occurrences with a
+persisted random UTC instant. The worker reserves UNKNOWN atomically before
+Outbound consumes an occurrence-bound approval and persists its own attempt.
+Crashes cannot cause reservation reclamation or automatic retries. Outcomes
+retain transport meaning; there is no exactly-once delivery claim. A foreground
+polling command and one-tick API support future launchd/dashboard integration.

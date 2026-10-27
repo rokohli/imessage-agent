@@ -475,10 +475,11 @@ def _literal(value: str) -> str:
 class AppleScriptMessagesAdapter:
     """Trusted Outbound callers only; no environment variable enables sending."""
 
-    def __init__(self, *, enabled: bool = False) -> None:
+    def __init__(self, *, enabled: bool = False, account_id: str | None = None) -> None:
         if type(enabled) is not bool:
             raise ValueError("enabled_requires_boolean")
         self.enabled = enabled
+        self.account_id = validate_account_id(account_id) if account_id is not None else None
 
     def dispatch(self, recipient: Recipient, body: str) -> SendOutcome:
         if not self.enabled:
@@ -492,6 +493,8 @@ class AppleScriptMessagesAdapter:
             raise ValueError("text_too_long")
         try:
             account_id = load_account_id()
+            if self.account_id is not None and account_id != self.account_id:
+                return SendOutcome(SendStatus.FAILED, "schedule_account_selection_changed")
         except AccountSelectionError as error:
             return SendOutcome(SendStatus.FAILED, str(error))
         script = _script(recipient, body=body, account_id=account_id)

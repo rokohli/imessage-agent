@@ -4,8 +4,11 @@
 
 The foundation has explicit-path read-only ingestion and a disabled-by-default
 text-only AppleScript adapter. Phase 3A adds a local-only Ollama draft client,
-with no automatic sending or background worker. The only sending CLI is the interactive supervised test,
-which requires existing UNKNOWN history, NEW text and explicit one-shot confirmation. The factory remains mock-only. Only trusted
+with no automatic AI replies. Phase 4 adds a trusted scheduling CLI with mock
+transport and read-only execution as defaults. Explicit live schedule authorization
+binds recipient, content, account, recurrence, windows and grace; only the separate
+`--execute-live` worker mode can dispatch these plans. The interactive supervised
+test retains its UNKNOWN-history, NEW-text and one-shot confirmation requirements. The factory remains mock-only. Only trusted
 local code may explicitly enable the real adapter through `Outbound`; neither
 environment variables nor development mode enable it. No real sends or permission
 changes were executed during implementation. Offline subprocesses are mocked.
@@ -145,3 +148,22 @@ profiles, model instructions or auto-sending. Context hydration and retrieval us
 only verified recipient/chat identities and precede each target; held-out replies
 are disclosed to the human only after model calls and are never fed into their
 own generation or claim review. Human/heuristic aggregates remain separate.
+
+
+## Scheduling boundary
+
+The [scheduling runbook](docs/scheduling.md) defines the authorization, DST,
+grace, claim and crash semantics. Schedule creation/editing requires exact terminal
+confirmation; no model or message can authorize it. Specifications and occurrence
+windows are revalidated inside the outbound claim. Live dispatch pins the selected
+account and checks account/recipient identity in the existing transport. A
+cancelled plan cannot authorize a new outbound claim, but an already claimed
+transport may finish. Trusted Python APIs remain trusted administration, not
+capability isolation or proof of a human confirmation.
+
+A durable occurrence reservation is UNKNOWN before any transport attempt. Crashed
+reservations are never reclaimed. Repeated resolved occurrences of the same
+schedule can repeat identical content; prior UNKNOWN/PARTIAL or unrelated payload
+claims still suppress it. All attempts and suppression records are retained.
+The CLI installs no daemon and wakes no Mac. Grace deadlines prevent stale sends
+when a stopped/asleep worker resumes. Dry-run is read-only and never dispatches.

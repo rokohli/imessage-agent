@@ -18,6 +18,7 @@ from .models import Contact, Recipient, SendStatus, payload_hash
 from .outbound import Outbound
 from .smoke import _schema
 from .storage import Store, _SCHEMA, _OUTBOUND_SCHEMA, _DRAFT_SCHEMA
+from .storage import _SCHEDULER_SCHEMA
 
 
 class SupervisedError(Exception):
@@ -43,8 +44,8 @@ def _existing_state(path: Path, recipient: Recipient, body: str) -> Path:
         connection.execute("PRAGMA trusted_schema=OFF")
         with closing(sqlite3.connect(":memory:")) as expected:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            expected.executescript(_SCHEMA + _OUTBOUND_SCHEMA + (_DRAFT_SCHEMA if version == 3 else ""))
-            if version not in (2, 3) or _schema(connection) != _schema(expected):
+            expected.executescript(_SCHEMA + _OUTBOUND_SCHEMA + (_DRAFT_SCHEMA if version >= 3 else "") + (_SCHEDULER_SCHEMA if version == 4 else ""))
+            if version not in (2, 3, 4) or _schema(connection) != _schema(expected):
                 raise SupervisedError("unrecognized_outbound_state")
         if not connection.execute("SELECT 1 FROM send_attempts WHERE status='unknown' LIMIT 1").fetchone():
             raise SupervisedError("prior_unknown_history_missing")

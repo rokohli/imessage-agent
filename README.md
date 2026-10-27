@@ -3,13 +3,15 @@
 A local-first Python messaging foundation with read-only macOS ingestion and a
 controlled text-only AppleScript transport. Sending defaults to disabled in every
 environment; the factory remains synthetic. Phase 3A includes local Ollama drafting
-and human evaluation. Automatic replies and background sending remain disabled.
+and human evaluation. AI replies remain disabled. Phase 4 adds explicitly authorized scheduling,
+with mock transport and a read-only worker as defaults.
 Importing performs no I/O. Real sending requires
 separate authorization and explicit trusted in-process enablement.
 
 The long-term goal is a local-first macOS agent with secure auto-replies, human
 approval, and randomized scheduling. Draft generation is preview-only; human ratings do not authorize sending.
-Scheduling execution is the next phase.
+The scheduling MVP is available through explicit CLI commands; see
+[the scheduling runbook](docs/scheduling.md) for safe mock testing.
 
 Phase 3A status: personalized general/contact profiles, conversation-aware retrieval,
 claim review, punctuation policy, human review and fixed-case blind comparison are
@@ -27,7 +29,8 @@ Autonomous replies remain disabled.
 - Exact recipient identities, default-deny permissions, and payload-bound approval
   primitives for controlled dispatches.
 - Durable attempt records that prevent automatic retries of ambiguous outcomes.
-- Schedule storage and cancellation, without random selection or execution.
+- Authorized one-time/randomized/recurring scheduling, cancellation, durable claims,
+  missed-window handling and execution history; no automatically installed worker.
 - Durable live rate limits, reply/echo-loop checks and default-disabled individual iMessage transport.
 - An isolated attributed-body decoder and standard-library offline tests.
 
@@ -225,14 +228,15 @@ checked (v1 state upgrades transactionally); unrelated nonempty version-0 databa
 | schedules | Canonical recipient, exact text, UTC epoch window/chosen time, IANA timezone, approval, pending/cancelled state. |
 | send_attempts | Idempotency ID, recipient, payload hash, approval, explicit outcome and provider identifier. |
 | outbound_claims | Durable live rate/payload reservations, generated-body hash and optional unique reply context. |
+| schedule_plans | Exact authorized specification, binding hash, status and recurrence cursor. |
+| schedule_occurrences | Unique plan/local day, selected UTC time, deadline, reservation and outcome. |
 
-Schedule insertion checks the contact, payload approval, timezone, and window.
-It stores a preselected timestamp; random selection, scheduling workers,
-execution leases, approval reservation for scheduled jobs, sleep/wake behavior,
-and delivery reconciliation are intentionally deferred. A schedule does not
-send anything or consume its approval. Multiple plans can reference one approval;
-only a future dispatch claim could consume it, and all others must then fail.
-There is no scheduler enabled merely by storing a pending row.
+The legacy `schedules` API stores reviewed plans but does not execute them or
+consume their approvals. Phase 4 uses separate `schedule_plans` and
+`schedule_occurrences` tables: old plans lack the scheduling-specific authorization
+and are never executed automatically. See [the scheduling runbook](docs/scheduling.md)
+for exact/randomized/recurring creation, authorization, cancellation and worker
+execution. No scheduler starts merely by storing a pending row.
 
 ## Privacy and permissions
 

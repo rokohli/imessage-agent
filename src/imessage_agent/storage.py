@@ -112,6 +112,36 @@ PRAGMA user_version = 3;
 """
 
 
+_SCHEDULER_SCHEMA = """
+CREATE TABLE schedule_plans (
+    id TEXT PRIMARY KEY,
+    spec TEXT NOT NULL,
+    authorization_hash TEXT NOT NULL,
+    authorized_at REAL NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active','cancelled')),
+    next_date TEXT NOT NULL,
+    replaces TEXT REFERENCES schedule_plans(id)
+);
+CREATE TABLE schedule_occurrences (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL REFERENCES schedule_plans(id),
+    local_date TEXT NOT NULL,
+    window_start REAL NOT NULL,
+    window_end REAL NOT NULL,
+    send_at REAL NOT NULL,
+    deadline REAL NOT NULL,
+    status TEXT NOT NULL CHECK(status IN
+        ('pending','cancelled','missed','unknown','accepted','sent','delivered','failed','partial')),
+    detail TEXT NOT NULL DEFAULT '',
+    claimed_at REAL,
+    UNIQUE(plan_id, local_date),
+    CHECK(window_start <= send_at AND send_at <= window_end AND deadline >= send_at)
+);
+CREATE INDEX schedule_due ON schedule_occurrences(status,send_at);
+PRAGMA user_version = 4;
+"""
+
+
 def _identifier(value: str) -> None:
     if not isinstance(value, str) or not value.strip() or len(value) > 128:
         raise ValueError("identifiers must contain 1 to 128 characters")
@@ -145,18 +175,20 @@ class Store:
         self.connection.row_factory = sqlite3.Row
         try:
             self.connection.execute("PRAGMA foreign_keys = ON")
-            version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-            if version == 0:
-                tables = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-                if tables:
+            with self.connection:
+                self.connection.execute("BEGIN IMMEDIATE")
+                version = self.connection.execute("PRAGMA user_version").fetchone()[0]
+                if version not in (0, 1, 2, 3, 4):
+                    raise ValueError("unsupported agent schema version")
+                if version == 0 and self.connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchone():
                     raise ValueError("refusing an unrecognized database")
-                self.connection.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA + _OUTBOUND_SCHEMA + "\nCOMMIT;")
-            elif version == 1:
-                self.connection.executescript("BEGIN IMMEDIATE;\n" + _OUTBOUND_SCHEMA + "\nCOMMIT;")
-            elif version not in (2, 3):
-                raise ValueError("unsupported agent schema version")
-            if version != 3:
-                self.connection.executescript("BEGIN IMMEDIATE;\n" + _DRAFT_SCHEMA + "\nCOMMIT;")
+                migrations = (_SCHEMA, _OUTBOUND_SCHEMA, _DRAFT_SCHEMA, _SCHEDULER_SCHEMA)
+                for migration in migrations[version:]:
+                    for statement in migration.split(';'):
+                        if statement.strip():
+                            self.connection.execute(statement)
         except BaseException:
             self.connection.close()
             raise
@@ -296,6 +328,8 @@ class Store:
         self, attempt_id: str, recipient: Recipient, body: str,
         approval_id: str | None, now: float, *, controlled: bool = False,
         reply_to: tuple[str, str] | None = None,
+        schedule_occurrence: str | None = None,
+        schedule_account_id: str | None = None,
     ) -> tuple[SendAttempt, bool]:
         _identifier(attempt_id)
         _finite(now)
@@ -313,6 +347,18 @@ class Store:
                 if previous.payload_hash != digest:
                     raise ValueError("attempt ID already belongs to another payload")
                 return previous, False
+            scheduled = None
+            if schedule_occurrence is not None:
+                from .scheduling import validate_occurrence, SchedulingError
+                if attempt_id != schedule_occurrence or approval_id is not None or reply_to is not None:
+                    raise SchedulingError('invalid_scheduled_attempt')
+                scheduled, spec = validate_occurrence(self.connection, schedule_occurrence, recipient, body, now)
+                if (controlled != (spec['transport'] == 'live')
+                        or schedule_account_id != spec['account_id']):
+                    raise SchedulingError('schedule_transport_mismatch')
+                approval_id = 'schedule-' + schedule_occurrence
+                self.connection.execute('INSERT INTO approvals VALUES (?,?,?,NULL)',
+                                        (approval_id, digest, math.nextafter(scheduled['deadline'], math.inf)))
             contact = self.contact(recipient)
             approval = self.approval(approval_id) if approval_id else None
             denial = ""
@@ -343,7 +389,11 @@ class Store:
             if not denial and controlled:
                 if self.connection.execute(
                     "SELECT 1 FROM outbound_claims c JOIN send_attempts a ON a.id=c.attempt_id "
-                    "WHERE a.recipient_key=? AND a.payload_hash=?", (recipient.key, digest),
+                    "LEFT JOIN schedule_occurrences o ON o.id=a.id "
+                    "WHERE a.recipient_key=? AND a.payload_hash=? AND NOT "
+                    "COALESCE((o.plan_id=? AND o.status IN ('accepted','sent','delivered','failed') "
+                    "AND a.status=o.status),0)",
+                    (recipient.key, digest, scheduled['plan_id'] if scheduled is not None else ''),
                 ).fetchone():
                     denial = "payload_already_reserved"
                 counts = self.connection.execute(
