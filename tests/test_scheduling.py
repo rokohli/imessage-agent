@@ -268,6 +268,7 @@ class SchedulingTests(unittest.TestCase):
             self.assertEqual(self.scheduler.tick(dry_run=False, live=True)[0]['status'], 'failed')
         self.assertEqual(self.store.attempt('prior').outcome.status, SendStatus.UNKNOWN)
 
+    @patch('imessage_agent.applescript.sys.platform', 'darwin')
     def test_live_adapter_refuses_changed_account_without_script(self):
         adapter = AppleScriptMessagesAdapter(enabled=True, account_id='authorized-synthetic-account')
         with patch('imessage_agent.applescript.load_account_id', return_value='other-synthetic-account'), patch(
@@ -394,6 +395,7 @@ class SchedulingTests(unittest.TestCase):
                 Outbound(self.store, AppleScriptMessagesAdapter(enabled=True), clock=lambda: self.now).submit(
                     row['id'], RECIPIENT, self.spec()['body'], schedule_occurrence=row['id'])
 
+    @patch('imessage_agent.applescript.sys.platform', 'darwin')
     def test_live_adapter_revalidates_bound_recipient_and_account_in_same_script(self):
         from types import SimpleNamespace
         adapter = AppleScriptMessagesAdapter(enabled=True, account_id='synthetic-account')
