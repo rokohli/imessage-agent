@@ -44,6 +44,36 @@ class ContentReviewTests(unittest.TestCase):
         self.assertEqual(result, ('approval_required', 'consequential_context'))
         checker.assert_not_called()
 
+    def test_consequential_request_in_consecutive_incoming_turn(self):
+        rows = [msg(1, 'can you cover my shift tomorrow'), msg(2, 'thanks')]
+        context = [{'direction': 'inbound', 'body': row.body} for row in rows]
+        for reply in ('👍', 'sure'):
+            with self.subTest(reply=reply):
+                checker = MagicMock(return_value='harmless')
+                self.assertEqual(review_reply(reply, needs_facts=False, context=context, classify=checker),
+                                 ('approval_required', 'consequential_context'))
+                checker.assert_not_called()
+                for pipeline in ('baseline', 'improved'):
+                    draft = generate(rows, CHATS, rows[-1], FakeProvider(reply), pipeline=pipeline)
+                    self.assertEqual(draft['validation_status'], 'approval_required')
+                    self.assertEqual(draft['claim_category'], 'consequential_context')
+                    self.assertEqual(draft['classification'], 'APPROVAL_REQUIRED')
+                    self.assertEqual(draft['reply'], reply)
+                    self.assertFalse(draft['auto_sending'])
+        report = evaluate(rows + [msg(3, '👍', True)], CHATS, [ModelConfig()], cases=1,
+                          provider_factory=lambda config: FakeProvider('👍'))
+        self.assertEqual(report['results'][0]['validation_counts']['accepted'], 0)
+        self.assertEqual(report['results'][0]['validation_counts']['approval_required'], 1)
+
+    def test_consequential_context_stops_at_previous_outgoing_reply(self):
+        context = [{'direction': 'inbound', 'body': 'can you cover my shift tomorrow'},
+                   {'direction': 'outbound', 'body': 'no'},
+                   {'direction': 'inbound', 'body': 'thanks'}]
+        checker = MagicMock(return_value='harmless')
+        self.assertEqual(review_reply('👍', needs_facts=False, context=context, classify=checker),
+                         ('accepted', 'harmless'))
+        checker.assert_not_called()
+
     def test_clear_claim_categories_preserve_text_for_confirmation(self):
         cases = (
             ('Checking emails, how about you?', 'activity'),
