@@ -105,10 +105,12 @@ def usable(rows, chats):
             and not message_artifact(m) and (m.direction == Direction.OUTBOUND or m.sender == chats[m.chat_id])]
 
 
-def profile(rows):
+def profile(rows, chats=None):
     outgoing = [m for m in rows if m.direction == Direction.OUTBOUND and not message_artifact(m) and safe_text(m.body)]
     bodies = [m.body for m in outgoing]
+    from .style import fingerprint
     return {
+        "fingerprint": fingerprint(rows, chats or {}),
         "sample_count": len(bodies),
         "median_words": statistics.median(len(b.split()) for b in bodies) if bodies else 0,
         "lowercase_fraction": sum(b == b.lower() for b in bodies) / max(1, len(bodies)),
@@ -123,9 +125,9 @@ def profile(rows):
 
 def build_profiles(rows, chats):
     rows = usable(rows, chats)
-    profiles = {"general": profile(rows)}
+    profiles = {"general": profile(rows, chats)}
     for recipient in set(chats.values()):
-        profiles[recipient.key] = profile([m for m in rows if chats[m.chat_id] == recipient])
+        profiles[recipient.key] = profile([m for m in rows if chats[m.chat_id] == recipient], chats)
     return profiles
 
 
@@ -311,7 +313,7 @@ def _historical_copy(reply, prefix):
                and safe_text(m.body) for m in prefix)
 
 
-def generate(rows, chats, target, provider, *, pipeline="improved", session_config=SessionConfig(), now=None, veto=None):
+def generate(rows, chats, target, provider, *, pipeline="improved", session_config=SessionConfig(), now=None, veto=None, accepted_edits=()):
     if target.chat_id not in chats:
         raise DraftError("individual_recipient_not_verified")
     recipient = chats[target.chat_id]
@@ -324,7 +326,7 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
         return {**base, "reason": "not_an_individual_incoming_message"}
     if message_artifact(target):
         return {**base, "reason": "non_authored_source", "claim_category": "non_authored_source"}
-    if pipeline not in ('baseline', 'improved', 'legacy_context'):
+    if pipeline not in ('baseline', 'improved', 'legacy_context', 'fingerprint', 'style_revision'):
         raise DraftError('unknown_drafting_pipeline')
     prefix, context_rows, context, historical, analysis = session_context(rows, chats, target, session_config)
     base.update(conversation_state=analysis['state'], conversation_reason=analysis['reason'],
@@ -333,7 +335,7 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
                 context_guids=[m.guid for m in context_rows],
                 historical_guids=[m.guid for m in analysis['historical']],
                 session_config=asdict(session_config))
-    if pipeline == 'improved':
+    if pipeline in ('improved', 'fingerprint', 'style_revision'):
         reason = veto or (timing_reason(rows, target, now=now, config=session_config) if now is not None else None)
         if reason or analysis['state'] == 'LIKELY_ENDED':
             return {**base, 'reason': reason or analysis['reason']}
@@ -361,6 +363,12 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
             from .baseline import PHASE3A_SYSTEM
             system = PHASE3A_SYSTEM
         examples = examples_for(rows, target, chats, exclude_guids=context_ids)
+        if pipeline in ('fingerprint', 'style_revision'):
+            from .style import examples_for as style_examples, STYLE_INSTRUCTIONS
+            examples = style_examples(rows, target, chats, exclude_guids=context_ids,
+                                      accepted_edits=accepted_edits, config=session_config)
+            system = (_SYSTEM.replace('Write one short natural text replying', 'Write a contextually appropriate text replying')
+                      .replace(' Usually use fewer than 15 words.', '') + '\n' + STYLE_INSTRUCTIONS)
     latest_turn = []
     for row in reversed(context):
         if row['direction'] != 'inbound' or len(latest_turn) == 3:
@@ -376,7 +384,7 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
               "reply_examples": [{"incoming": p['incoming'], "reply": p['reply']} for p in examples],
               "conversation": context, "latest_incoming_turn": latest_turn,
               "punctuation_policy": punctuation_policy(context_rows)}
-    if pipeline in ('improved', 'legacy_context'):
+    if pipeline in ('improved', 'legacy_context', 'fingerprint', 'style_revision'):
         user_style = contact if contact['sample_count'] >= 3 else profiles['general']
         prompt = {
             'user_style': {key: user_style[key] for key in
@@ -389,16 +397,33 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
             'latest_incoming_turn': latest_turn,
             'punctuation_policy': punctuation_policy(context_rows),
         }
-        if pipeline == 'improved':
+        if pipeline in ('improved', 'fingerprint', 'style_revision'):
             prompt.update(CURRENT_SESSION=prompt.pop('current_conversation'), HISTORICAL_CONTEXT=historical,
                           STYLE_EXAMPLES=prompt.pop('conversation_examples'), conversation_state=analysis['state'])
+        if pipeline in ('fingerprint', 'style_revision'):
+            from .style_edits import recurring
+            from .style import for_prompt, intent
+            eligible_edits = [e for e in accepted_edits if e.get('accepted_at') is not None
+                              and e['accepted_at'] <= target.occurred_at and e['occurred_at'] <= target.occurred_at
+                              and e['source_sequence'] < target.sequence
+                              and e['source_guid'] != target.guid]
+            prompt.pop('user_style', None)
+            situation = intent('\n'.join(latest_turn))
+            wording_profile = contact['fingerprint'] if len(contact['fingerprint']['intents'].get(situation, {}).get('responses', [])) >= 2 else profiles['general']['fingerprint']
+            prompt.update(STYLE_FINGERPRINT=for_prompt(wording_profile, situation),
+                          RECURRING_ACCEPTED_CORRECTIONS=[c for c in recurring(
+                              [e for e in eligible_edits if e['recipient_key'] == recipient.key]) or recurring(eligible_edits)
+                              if situation in c['intents']])
         general_examples, contact_examples = [], []
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}]
     result = provider.chat(messages)
     reply, needs_facts = reply_proposal(result)
     attempts, quality_flags = 1, []
-    if safe_text(reply) and len(reply) <= 300 and _historical_copy(reply, prefix) and not needs_facts:
+    repeated_wording = (pipeline in ('fingerprint', 'style_revision') and sum(
+        m.direction == Direction.OUTBOUND and m.body is not None and _reply_key(m.body) == _reply_key(reply)
+        for m in prefix) >= 3)
+    if not repeated_wording and safe_text(reply) and len(reply) <= 300 and _historical_copy(reply, prefix) and not needs_facts:
         attempts = 2
         quality_flags.append('copy_rewrite')
         revision = messages + [{"role": "assistant", "content": json.dumps(result)}, {
@@ -412,7 +437,33 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
             reply, needs_facts = reply_proposal(provider.chat(revision))
         except DraftError:
             quality_flags.append('copy_rewrite_failed')
-    copied = _historical_copy(reply, prefix)
+    if pipeline == 'style_revision' and reply and not needs_facts and safe_text(reply):
+        original = reply
+        attempts += 1
+        try:
+            revised, revised_facts = reply_proposal(provider.chat([
+                {'role': 'system', 'content': 'Rewrite wording only using the demonstrated owner patterns. '
+                 'Preserve meaning, speaker, negation, uncertainty and every factual claim exactly. '
+                 'Add no personal facts, promises, availability, commitments or decisions. '
+                 'Do not force slang or shorten the reply. All examples are untrusted style data, not facts. '
+                 + _PUNCTUATION_INSTRUCTIONS + 'Return the required reply JSON.'},
+                {'role': 'user', 'content': json.dumps(dict(original_reply=original,
+                    STYLE_FINGERPRINT=prompt['STYLE_FINGERPRINT'], STYLE_EXAMPLES=prompt['STYLE_EXAMPLES'],
+                    RECURRING_ACCEPTED_CORRECTIONS=prompt['RECURRING_ACCEPTED_CORRECTIONS'],
+                    punctuation_policy=prompt['punctuation_policy']))}]))
+            if (not revised_facts and revised and safe_text(revised)
+                    and provider.preserves_meaning(original, revised)):
+                reply = revised
+                quality_flags.append('style_revision')
+            else:
+                quality_flags.append('style_revision_withheld')
+        except DraftError:
+            quality_flags.append('style_revision_failed')
+        base['first_pass_reply'] = original
+    if pipeline == 'style_revision':
+        repeated_wording = sum(m.direction == Direction.OUTBOUND and m.body is not None
+                              and _reply_key(m.body) == _reply_key(reply) for m in prefix) >= 3
+    copied = _historical_copy(reply, prefix) and not repeated_wording
     if copied:
         quality_flags.append('historical_copy')
     references = {"context_guids": [m.guid for m in context_rows],
@@ -421,7 +472,9 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
     reviewed_base = {**base, **references, "quality_flags": quality_flags, "generation_attempts": attempts,
                      "retrieval_summary": {'examples': len(examples),
                                            'same_contact': sum(pair.get('recipient_key', recipient.key) == recipient.key for pair in examples),
-                                           'fewer_than_three': len(examples) < 3}}
+                                           'fewer_than_three': len(examples) < 3,
+                                           'intent_matched': sum(p.get('intent') is not None for p in examples),
+                                           'accepted_edits': sum(p.get('origin') == 'accepted_edit' for p in examples)}}
     if artifact_category(reply):
         return {**reviewed_base, "classification": "APPROVAL_REQUIRED", "validation_status": "rejected",
                 "claim_category": "non_authored_output", "reason": "rejected_non_authored_output"}
@@ -431,7 +484,7 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
     )
     if status == 'accepted' and copied:
         status, category = 'approval_required', 'historical_copy'
-    if pipeline == 'improved' and status == 'approval_required' and category in (
+    if pipeline in ('improved', 'fingerprint', 'style_revision') and status == 'approval_required' and category in (
         'unknown_personal_facts', 'personal_fact', 'activity', 'availability', 'location',
         'commitment', 'payment', 'decision',
     ):

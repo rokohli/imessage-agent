@@ -405,3 +405,8 @@ Phase 3B adds on-demand recipient name lookup and timestamped, session-aware
 reply context with ending/burst/staleness suppression. Auto replies remain off.
 See [Contacts and conversation behavior](docs/phase3b-conversations.md) for setup,
 limitations, worker freshness checks and same-case local evaluation.
+
+[Authentic texting style](docs/authentic-texting-style.md) adds observed wording
+fingerprints, situation-matched owner examples, approved-edit learning and an
+experimental wording-only second pass. Single pass is the default; no AI replies
+are automatically sent. `compare-styles` prepares a same-model blind A/B/C study.

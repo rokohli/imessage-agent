@@ -14,6 +14,9 @@ import { ScheduleForm, validateSchedule } from "./ScheduleForm";
 import { App } from "./main";
 vi.mock("./api", () => ({
   api: {
+    styleEdits: vi.fn(),
+    deleteStyleEdit: vi.fn(),
+    clearStyleEdits: vi.fn(),
     thresholds: vi.fn(),
     saveThresholds: vi.fn(),
     authorizeContacts: vi.fn(),
@@ -59,6 +62,7 @@ const settings = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(api.styleEdits).mockResolvedValue([]);
   vi.mocked(api.thresholds).mockResolvedValue({gap_seconds: 14400, day_gap_seconds: 1800, burst_seconds: 15});
   vi.mocked(api.worker).mockResolvedValue({status: "stopped", heartbeat: null, last_poll: null, pending_count: 0, next_execution: null, recent_errors: [], last_outcome: null, transport: null});
   vi.mocked(api.settings).mockResolvedValue(settings);
@@ -480,4 +484,17 @@ it("leaves direct handle entry available when name lookup is denied", async () =
   fireEvent.change(screen.getByLabelText("Recipient"), {target: {value: "+12025550101"}});
   expect(screen.getByLabelText("Recipient")).toHaveValue("+12025550101");
   expect(api.saveSchedule).not.toHaveBeenCalled();
+});
+
+
+it("shows wording modes and lets the owner delete learned edits", async () => {
+  vi.mocked(api.styleEdits).mockResolvedValue([{id: "edit-one", draft_id: "draft-one", recipient_key: "phone:+12025550101",
+    original: "Absolutely", edited: "yea", created_at: 1, accepted_at: 2}]);
+  vi.mocked(api.deleteStyleEdit).mockResolvedValue({});
+  render(<SettingsPage />);
+  expect(await screen.findByLabelText("Draft wording mode")).toHaveValue("single_pass");
+  expect(screen.getByText("Original AI wording: Absolutely")).toBeInTheDocument();
+  expect(screen.getByText("Your wording: yea")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Delete edit"}));
+  await waitFor(() => expect(api.deleteStyleEdit).toHaveBeenCalledWith("edit-one"));
 });

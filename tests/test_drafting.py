@@ -50,6 +50,9 @@ class FakeProvider:
         self.prompts.append(messages)
         return self.result
 
+    def preserves_meaning(self, original, revised):
+        return True
+
     def classify_claims(self, context, reply):
         self.claim_reviews.append((context, reply))
         return self.category
@@ -222,7 +225,7 @@ class DraftingTests(unittest.TestCase):
         rows = [msg(1, 'thank you'), msg(2, 'never include this heldout', True)]
         evaluate(rows, CHATS, [ModelConfig()], provider_factory=lambda c: provider)
         prompt = json.loads(provider.prompts[0][1]['content'])
-        self.assertEqual(prompt['user_style']['sample_count'], 0)
+        self.assertEqual(prompt['STYLE_FINGERPRINT']['sample_count'], 0)
         self.assertNotIn('general_examples', prompt)
         self.assertNotIn('heldout', json.dumps(prompt))
         self.assertNotIn('heldout', json.dumps(provider.claim_reviews))

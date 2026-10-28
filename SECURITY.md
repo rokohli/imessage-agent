@@ -219,3 +219,21 @@ explicit read-only Messages source. No auto-reply loop or UNKNOWN retry is added
 Saved-case comparisons use a separate private database and local-only Ollama;
 model self-judgments are not human ratings or dispatch permission. See
 [Phase 3B behavior](docs/phase3b-conversations.md) for privacy and evidence limits.
+
+## Owner style and edit evidence
+
+Style fingerprints count only verified authored outgoing history. Approved human
+edits are stored locally with original AI text, exact edited text, recipient/source
+and timestamped context. Unapproved drafts, submissions, regeneration and unchanged
+AI approvals never become human style evidence. Original AI text in a correction
+is explicitly marked as wording to replace. Two independent source messages are
+required for recurring, intent-scoped corrections; one correction is not a rule.
+Owner-only state remains plaintext. Dashboard deletion removes edit-derived memory
+without changing Messages, actual outgoing history, authorizations or prior reviews.
+
+Historical generation excludes future sequence/timestamp evidence, including later
+edit acceptance. The optional wording pass requires a local meaning-preservation
+check and final existing claim validation. Meaning checks can err; autonomous sending
+remains disabled and punctuation permission still comes only from visible owner
+outgoing messages. Evaluation uses a separate private file and the same local model
+for every variant; human ratings and latency are reported independently.

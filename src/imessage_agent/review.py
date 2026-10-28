@@ -98,11 +98,13 @@ class ReviewStore:
 
     def rate(self, ordinal, rating):
         extra = {'session_boundary_correct', 'topic_switch_correct', 'unnecessary_reply'} if self.session().get('session_study') else set()
-        if any(rating.get(key) is not None and type(rating.get(key)) is not bool for key in extra):
+        if self.session().get('style_study'):
+            extra = {'slang_authenticity', 'formality'}
+        if any(rating.get(key) is not None and type(rating.get(key)) is not bool for key in extra if key not in ('slang_authenticity', 'formality')):
             raise DraftError('invalid_review_rating')
         if (set(rating) != {'style', 'relevance', 'naturalness', 'invents_personal_information'} | extra
                 or any(type(rating[key]) is not int or not 1 <= rating[key] <= 5
-                       for key in ('style', 'relevance', 'naturalness'))
+                       for key in ('style', 'relevance', 'naturalness') + (('slang_authenticity', 'formality') if self.session().get('style_study') else ()))
                 or type(rating['invents_personal_information']) is not bool):
             raise DraftError('invalid_review_rating')
         with self.connection:
@@ -180,6 +182,10 @@ def blind_summary(metadata, cases):
                                'median': statistics.median(timings) if timings else None,
                                'p95': timings[max(0, math.ceil(len(timings) * .95) - 1)] if timings else None,
                            }}
+        if metadata.get('style_study'):
+            ratings = [json.loads(row['rating_json']) for row in subset if row['rating_json']]
+            variants[label]['wording_quality'] = {key: statistics.mean(r[key] for r in ratings) if ratings else None
+                                                  for key in ('slang_authenticity', 'formality')}
         if metadata.get('session_study'):
             ratings = [json.loads(row['rating_json']) for row in subset if row['rating_json']]
             variants[label]['conversation_quality'] = {}
@@ -189,7 +195,7 @@ def blind_summary(metadata, cases):
                     'rated': len(values), 'rate': statistics.mean(values) if values else None}
     return {**report, 'cases_per_variant': metadata['cases_per_variant'], 'variants': variants,
             'skipped_variants': metadata['skipped_variants'],
-            'latency_scope': 'wall time including retrieval, local health checks, generation, revisions and claim review; loading included',
+            'latency_scope': 'per-draft wall time including profiles/retrieval, local health checks, generation, revisions and claim review; database loading and human review excluded',
             'quality_basis': 'human rubric and invention labels with coverage; no automated winner or acceptance-rate optimization'}
 
 
@@ -221,7 +227,7 @@ def _show_case(ordinal, snapshot, *, blind=False, session_study=False):
           'not merely whether they sound plausible.')
 
 
-def _read_rating(*, session_study=False):
+def _read_rating(*, session_study=False, style_study=False):
     while True:
         answer = input('Rate style/relevance/naturalness (1-5 each) and invented personal info (y/n), '
                        'e.g. 4 5 4 n; s=skip, q=quit: ').strip().lower()
@@ -232,6 +238,14 @@ def _read_rating(*, session_study=False):
                 and parts[3] in ('y', 'yes', 'n', 'no')):
             rating = {'style': int(parts[0]), 'relevance': int(parts[1]), 'naturalness': int(parts[2]),
                     'invents_personal_information': parts[3] in ('y', 'yes')}
+            if style_study:
+                for key, meaning in (('slang_authenticity', '1=forced/unlike you, 5=authentic or appropriately absent'),
+                                     ('formality', '1=very informal, 5=very formal; describe, do not optimize')):
+                    while True:
+                        value = input(key.replace('_', ' ') + ' (' + meaning + '): ').strip()
+                        if value in ('1', '2', '3', '4', '5'):
+                            rating[key] = int(value)
+                            break
             if session_study:
                 for key in ('session_boundary_correct', 'topic_switch_correct', 'unnecessary_reply'):
                     while True:
@@ -276,7 +290,8 @@ def run_review(args):
                     _, _, context = prepare_context(preceding, chats, incoming)
                     error = None
                     try:
-                        draft = generate(preceding, chats, incoming, provider)
+                        draft = generate(preceding, chats, incoming, provider,
+                                         pipeline='style_revision' if args.style_mode == 'two_pass' else 'fingerprint')
                     except DraftError as failure:
                         error, draft = str(failure), None
                     snapshot = {'source_guid': incoming.guid, 'held_out_guid': actual.guid,
@@ -303,7 +318,8 @@ def run_review(args):
                       f"Case {row['ordinal']}: unavailable ({snapshot['generation_error']}); not rated.")
                 continue
             _show_case(row['ordinal'], snapshot, blind=blind, session_study=store.session().get('session_study', False))
-            rating = _read_rating(session_study=store.session().get('session_study', False))
+            rating = _read_rating(session_study=store.session().get('session_study', False),
+                                  style_study=store.session().get('style_study', False))
             if rating == 'q':
                 break
             if rating != 's':

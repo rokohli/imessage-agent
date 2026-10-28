@@ -797,6 +797,7 @@ export function SettingsPage() {
       timezone: String(form.get("timezone")),
       grace: Number(form.get("grace")),
       notifications: form.get("notifications") === "on",
+      style_mode: form.get("style_mode") === "two_pass" ? "two_pass" : "single_pass",
     };
     try {
       await api.saveSettings(data);
@@ -820,6 +821,7 @@ export function SettingsPage() {
       )}
       <WorkerPanel />
       <ConversationPreferences />
+      <LearnedStyleEdits />
       <div className="two-col">
         <Card title="Application preferences">
           {state.data && (
@@ -836,6 +838,13 @@ export function SettingsPage() {
                     required
                     defaultValue={state.data.model}
                   />
+                </label>
+                <label>
+                  Draft wording mode
+                  <select name="style_mode" defaultValue={state.data.style_mode ?? "single_pass"}>
+                    <option value="single_pass">Single pass · observed style</option>
+                    <option value="two_pass">Experimental two pass · wording revision</option>
+                  </select>
                 </label>
                 <label>
                   Default timezone
@@ -1025,4 +1034,31 @@ function ConversationPreferences() {
       </form>}
     </Card>
   </div>;
+}
+
+
+function LearnedStyleEdits() {
+  const state = useData(api.styleEdits);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const remove = async (id?: string) => {
+    setBusy(true); setError("");
+    try {
+      if (id) await api.deleteStyleEdit(id); else await api.clearStyleEdits();
+      await state.refresh();
+    } catch (e) { setError(errorMessage(e)); }
+    finally { setBusy(false); }
+  };
+  return <Card title="Learn from my draft edits">
+    <p>Edits stay local. Only edits you explicitly approve become style evidence. Repeated corrections need separate messages; one edit is not a general rule.</p>
+    <LoadState {...state} retry={state.refresh} /><ErrorText error={error} />
+    {state.data?.length === 0 && <p>No saved draft edits.</p>}
+    {state.data?.map(edit => <div className="context" key={edit.id}>
+      <p>{edit.accepted_at ? "Accepted style evidence" : "Unapproved · not used for style"} · {time(edit.created_at)}</p>
+      <p>Original AI wording: {edit.original || "[empty]"}</p>
+      <p>Your wording: {edit.edited}</p>
+      <button disabled={busy} onClick={() => void remove(edit.id)}>Delete edit</button>
+    </div>)}
+    {!!state.data?.length && <button disabled={busy} onClick={() => void remove()}>Delete all learned edits</button>}
+  </Card>;
 }
