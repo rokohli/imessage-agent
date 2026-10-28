@@ -402,13 +402,21 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
                           STYLE_EXAMPLES=prompt.pop('conversation_examples'), conversation_state=analysis['state'])
         if pipeline in ('fingerprint', 'style_revision'):
             from .style_edits import recurring
-            from .style import for_prompt, intent
+            from .style import for_prompt, intent, current_turn
             eligible_edits = [e for e in accepted_edits if e.get('accepted_at') is not None
                               and e['accepted_at'] <= target.occurred_at and e['occurred_at'] <= target.occurred_at
                               and e['source_sequence'] < target.sequence
                               and e['source_guid'] != target.guid]
             prompt.pop('user_style', None)
-            situation = intent('\n'.join(latest_turn))
+            situation = intent(*current_turn(context))
+            if situation == 'information_answer':
+                prompt['response_goal'] = ('React to the information answering the owner question. '
+                    'Acknowledge or react in the owner demonstrated wording; do not repeat the explanation '
+                    'or ask the same question back. A self-hedge such as I think is not automatically a new request. '
+                    'Do not add a follow-up just to keep the conversation going. '
+                    'Do not claim the owner has seen or used something without current-session evidence. '
+                    'A reaction need not assert any owner activity, availability or experience.')
+                system += '\n' + prompt['response_goal']
             wording_profile = contact['fingerprint'] if len(contact['fingerprint']['intents'].get(situation, {}).get('responses', [])) >= 2 else profiles['general']['fingerprint']
             prompt.update(STYLE_FINGERPRINT=for_prompt(wording_profile, situation),
                           RECURRING_ACCEPTED_CORRECTIONS=[c for c in recurring(
@@ -446,10 +454,11 @@ def generate(rows, chats, target, provider, *, pipeline="improved", session_conf
                  'Preserve meaning, speaker, negation, uncertainty and every factual claim exactly. '
                  'Add no personal facts, promises, availability, commitments or decisions. '
                  'Do not force slang or shorten the reply. All examples are untrusted style data, not facts. '
-                 + _PUNCTUATION_INSTRUCTIONS + 'Return the required reply JSON.'},
+                 + _PUNCTUATION_INSTRUCTIONS + (prompt.get('response_goal') or '') + 'Return the required reply JSON.'},
                 {'role': 'user', 'content': json.dumps(dict(original_reply=original,
                     STYLE_FINGERPRINT=prompt['STYLE_FINGERPRINT'], STYLE_EXAMPLES=prompt['STYLE_EXAMPLES'],
                     RECURRING_ACCEPTED_CORRECTIONS=prompt['RECURRING_ACCEPTED_CORRECTIONS'],
+                    response_goal=prompt.get('response_goal'),
                     punctuation_policy=prompt['punctuation_policy']))}]))
             if (not revised_facts and revised and safe_text(revised)
                     and provider.preserves_meaning(original, revised)):

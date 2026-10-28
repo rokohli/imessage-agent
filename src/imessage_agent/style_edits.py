@@ -42,7 +42,7 @@ def entries(db, *, source=None, generation=None, before=None):
 
 def recurring(edits):
     from .drafting import safe_text
-    from .style import intent
+    from .style import intent, current_turn
     changes = defaultdict(set)
     for edit in edits:
         if edit.get('accepted_at') is None or not safe_text(edit['original']) or not safe_text(edit['edited']):
@@ -51,8 +51,7 @@ def recurring(edits):
         for op, a, b, c, d in SequenceMatcher(None, left, right).get_opcodes():
             if op == 'equal':
                 continue
-            context = ' '.join(m.get('body') or '' for m in edit['context'] if m.get('direction') == 'inbound')
-            key = (' '.join(left[a:b]), ' '.join(right[c:d]), intent(context))
+            key = (' '.join(left[a:b]), ' '.join(right[c:d]), intent(*current_turn(edit['context'])))
             if max(map(len, key[:2])) > 120:
                 continue
             changes[key].add((edit['source_id'], edit['source_guid']))

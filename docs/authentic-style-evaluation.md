@@ -119,3 +119,33 @@ synthetically. Real-world style quality and meaning-guard accuracy remain unmeas
 No real messages were sent, no outbound policy was relaxed, no UNKNOWN was retried,
 and no new live or automated reply loop was started. The local meaning check can
 err, so two-pass mode remains experimental and autonomous sending stays disabled.
+
+## Targeted feedback follow-up — 2026-10-28
+
+An owner-provided failure showed a contact answering an earlier owner question,
+while the generated draft repeated the explanation and asked for an opinion back.
+Inspection confirmed the earlier intent rule classified a trailing self-hedge as
+an opinion request without considering the owner's preceding question.
+
+The follow-up distinguishes an informational answer from new questions and social
+check-ins, preserves the preceding owner question in relevant style examples, and
+supplies a reaction goal for this turn type. Synthetic regressions use a fictional
+calendar-tool exchange, not copied private messages. No suggested reaction from one
+owner correction is installed as a universal response, and no live learned-edit
+record or outbound approval is created from this feedback.
+
+Two separate local no-send diagnostic previews were generated for the feedback
+case. Both stopped asking the same opinion question back, but both were held by
+the existing activity-claim reviewer. That is **not a verified wording success**;
+the classifier can also be wrong, and no new human quality rating is inferred.
+The later private diagnostic is `/private/tmp/imessage-answer-reaction-preview-v2.json`
+(mode 0600), separate from the blind study. Neither private reply is reproduced here.
+The blind-review file was checked unchanged during both diagnostics; its snapshots
+and the owner's ongoing ratings were not rewritten. No model variant was revealed.
+
+Validation for the follow-up: **403 offline Python tests passed**, including six
+new answer/reaction regressions. They cover hedged answers, genuine opinion and
+factual questions, social turns/check-ins, session/system boundaries, question
+provenance, reaction-goal delivery, edited-example intent and unsupported prior
+experience still requiring user input. No real messages were sent and no live
+process, authorization or Messages data was modified. This PR remains experimental.

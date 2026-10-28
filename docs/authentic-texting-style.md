@@ -147,3 +147,24 @@ criterion. No winner is reported without human review.
 See [the evaluation record](authentic-style-evaluation.md) for prepared cases,
 latency and remaining human work. Restart the dashboard when ready to load these
 new settings/endpoints; this implementation does not restart live processes.
+
+## Reacting to an answer (2026-10-28 follow-up)
+
+Style intent now considers the preceding owner question within the current session.
+A trailing self-hedge such as “I think?” or “I guess?” is not automatically an
+opinion request. A factual answer is distinguished from a genuine new question,
+standalone thanks/greetings/acknowledgments, and answers to social check-ins.
+Historical answer/reaction examples retain the owner question before the contact's
+answer, with timestamps and speaker order. Accepted-edit matching and recurring
+corrections use the same turn interpretation. System, topic, session and time
+boundaries still limit the retained question context.
+
+For a contact answering the owner, generation and optional wording revision receive
+a trusted turn goal: react to the information without restating its explanation,
+asking the same question back, or adding a follow-up solely to extend the exchange.
+This is not a fixed reaction template or permission to claim prior familiarity,
+experience, availability or activity. Existing final claim checks remain intact.
+Intent heuristics and model adherence still require human assessment.
+
+This patch affects future generation only. Previously saved blind snapshots and
+ratings are not rewritten; resume continues the original experiment.
