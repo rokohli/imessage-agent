@@ -10,6 +10,7 @@ from .notifications import application_directory
 
 
 KEY = 'contacts:settings'
+SCHEDULED_RECIPIENT = 'Scheduled recipient'
 
 
 def normalize_handle(handle, country_code=None):
@@ -133,10 +134,13 @@ class Contacts:
 
     def resolve(self, handle):
         from .models import Recipient
-        contact = self.store.contact(Recipient.parse(handle))
-        name = contact.display_name if contact else handle
-        return dict(display_name=name, handles=[handle],
-                    resolution='resolved' if name != handle else 'unresolved')
+        recipient = Recipient.parse(handle)
+        contact = self.store.contact(recipient)
+        raw_name = contact.display_name.strip() if contact and contact.display_name else ''
+        has_genuine_label = bool(raw_name and raw_name != SCHEDULED_RECIPIENT and raw_name != recipient.address)
+        name = raw_name if has_genuine_label else recipient.address
+        return dict(display_name=name, handles=[recipient.address],
+                    resolution='resolved' if has_genuine_label else 'unresolved')
 
 
 def add_commands(commands):

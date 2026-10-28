@@ -217,8 +217,7 @@ class DashboardService:
                                        display_name=recipient.address, outbound_allowed=False))
         for row in known.values():
             resolved = self.names.resolve(row['address'])
-            if resolved['resolution'] == 'resolved':
-                row.update(display_name=resolved['display_name'])
+            row.update(display_name=resolved['display_name'])
         results = []
         for row in sorted(known.values(), key=lambda c: (c['display_name'], c['recipient_key'])):
             if query.casefold() not in (row['display_name'] + ' ' + row['address']).casefold():

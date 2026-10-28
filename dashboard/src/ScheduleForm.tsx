@@ -40,7 +40,10 @@ export function ScheduleForm({
   const s = schedule?.spec;
   const [data, setData] = useState<ScheduleInput>({
     recipient: s?.recipient ?? "",
-    recipient_name: schedule?.display_name || null,
+    recipient_name:
+      schedule?.display_name && schedule.display_name !== s?.recipient
+        ? schedule.display_name
+        : null,
     body: s?.body ?? "",
     start_date: s?.start_date ?? "",
     start_time: s?.start_time ?? "",

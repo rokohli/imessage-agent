@@ -101,7 +101,9 @@ class DashboardTests(unittest.TestCase):
     def test_allowlist_explicit_authorization(self):
         other = '+12025550102'
         self.assertEqual(self.write('/schedules', self.spec(recipient=other)).status_code, 422)
-        self.assertEqual(self.write('/schedules', self.spec(recipient=other, authorize_recipient=True)).status_code, 200)
+        response = self.write('/schedules', self.spec(recipient=other, authorize_recipient=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['display_name'], other)
         self.assertTrue(self.store.contact(Recipient.parse(other)).outbound_allowed)
 
     def test_all_recurrence_modes_and_dst_boundaries(self):

@@ -577,7 +577,8 @@ function DraftCard({
           close={() => !busy && setConfirm(null)}
         >
           <p>
-            <b>{draft.display_name || draft.recipient}</b> · {draft.recipient}
+            <b>{draft.display_name && draft.display_name !== draft.recipient ? draft.display_name : draft.recipient}</b>
+            {draft.display_name && draft.display_name !== draft.recipient ? ` · ${draft.recipient}` : ""}
           </p>
           <p className="message">{draft.body}</p>
           <p>
@@ -663,14 +664,20 @@ export function Activity() {
   const rows = [
     ...(state.data?.occurrences.map((o) => ({
       id: `o:${o.id}`,
-      recipient: o.display_name ? `${o.display_name} · ${o.recipient}` : o.recipient,
+      recipient:
+        o.display_name && o.display_name !== o.recipient
+          ? `${o.display_name} · ${o.recipient}`
+          : o.recipient,
       status: o.status,
       at: o.send_at,
       kind: "Scheduled execution",
     })) ?? []),
     ...(state.data?.attempts.map((a) => ({
       id: `a:${a.id}`,
-      recipient: a.display_name ? `${a.display_name} · ${a.recipient}` : a.recipient,
+      recipient:
+        a.display_name && a.display_name !== a.recipient
+          ? `${a.display_name} · ${a.recipient}`
+          : a.recipient,
       status: a.status,
       at: a.created_at,
       kind: "Send attempt",

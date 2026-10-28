@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
-from imessage_agent.contacts import Contacts, normalize_handle, native_contacts, KEY
+from imessage_agent.contacts import Contacts, normalize_handle, native_contacts, KEY, SCHEDULED_RECIPIENT
 from imessage_agent.dashboard_service import DashboardService
 from imessage_agent.models import Contact
 from imessage_agent.storage import Store
@@ -80,6 +80,17 @@ class ContactsTests(unittest.TestCase):
         self.assertEqual(view['recipient_key'], ALICE.key)
         self.assertFalse(view['outbound_allowed'])
         self.native.assert_not_called()
+
+    def test_placeholder_recipient_names_fall_back_to_canonical_handle(self):
+        self.store.put_contact(Contact(ALICE, SCHEDULED_RECIPIENT, True))
+        resolved = self.names.resolve(ALICE.address)
+        self.assertEqual(resolved['display_name'], ALICE.address)
+        self.assertEqual(resolved['resolution'], 'unresolved')
+        self.assertEqual(resolved['handles'], [ALICE.address])
+        service = DashboardService(self.store)
+        service.names = self.names
+        view = service.contacts()[0]
+        self.assertEqual(view['display_name'], ALICE.address)
 
     def test_opening_state_discards_old_bulk_cache_but_keeps_authorizations(self):
         self.store.put_contact(Contact(ALICE, 'Chosen Alice', True))
