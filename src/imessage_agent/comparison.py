@@ -109,14 +109,18 @@ def run_comparison(args):
         }
         skipped = []
         session_study = args.command == 'compare-sessions'
+        style_study = args.command == 'compare-styles'
         if session_study:
             variants = {'A': {'pipeline': 'legacy_context', 'config': vars(base)},
                         'B': {'pipeline': 'improved', 'config': vars(base)}}
-        if not session_study and 'qwen2.5:7b' in installed:
+        if style_study:
+            variants = {label: {'pipeline': pipeline, 'config': vars(base)} for label, pipeline in
+                        (('A', 'improved'), ('B', 'fingerprint'), ('C', 'style_revision'))}
+        if not session_study and not style_study and 'qwen2.5:7b' in installed:
             larger = replace(base, model='qwen2.5:7b')
             Ollama(larger).health()
             variants['C'] = {'pipeline': 'improved', 'config': vars(larger)}
-        elif not session_study:
+        elif not session_study and not style_study:
             skipped.append({'variant': 'C', 'model': 'qwen2.5:7b', 'reason': 'not_installed_locally'})
         jobs = [(label, case['source_case']) for label in variants for case in frozen]
         random.SystemRandom().shuffle(jobs)
@@ -127,7 +131,7 @@ def run_comparison(args):
                     'source_id': source_metadata['source_id'], 'generation': source_metadata['generation'],
                     'requested': len(jobs), 'cases_per_variant': 20, 'variants': variants,
                     'skipped_variants': skipped, 'sampling': sampling,
-                    'preparation_complete': False, 'created_at': time.time(), 'session_study': session_study}
+                    'preparation_complete': False, 'created_at': time.time(), 'session_study': session_study, 'style_study': style_study}
         store.put_session(metadata)
         prepared = 0
         for label, description in variants.items():
@@ -145,7 +149,7 @@ def run_comparison(args):
                     'variant': label, 'source_case': case['source_case'],
                     'source_guid': incoming.guid, 'held_out_guid': actual.guid,
                     'source_sequence': incoming.sequence, 'actual_sequence': actual.sequence,
-                    'context': review_evidence(case['preceding'], incoming) if session_study else case['context'],
+                    'context': review_evidence(case['preceding'], incoming) if session_study or style_study else case['context'],
                     'draft': draft, 'actual_reply': actual.body,
                     'generation_error': error, 'latency_ms': elapsed,
                     'heuristic_scores': compare(draft['reply'] if draft and draft['validation_status'] == 'accepted'

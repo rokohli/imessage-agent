@@ -23,7 +23,8 @@ export interface components {schemas: {
 "ScheduleInput": {"recipient": string; "body": string; "start_date": string; "start_time": string; "timezone": string; "end_time"?: string | null; "recurrence"?: "once" | "daily" | "weekly" | "weekdays"; "weekdays"?: (number)[]; "until"?: string | null; "fold"?: "reject" | "earlier" | "later"; "grace"?: number; "transport"?: "mock" | "live"; "account_id"?: string | null; "confirmed": true; "authorize_recipient"?: boolean; "recipient_name"?: string | null};
 "ScheduleSpec": {"recipient": string; "body": string; "start_date": string; "start_time": string; "end_time": string; "window": boolean; "timezone": string; "recurrence": string; "weekdays": (number)[]; "until": string | null; "fold": string; "grace": number; "transport": string; "account_id": string | null};
 "ScheduleView": {"display_name"?: string; "id": string; "status": string; "spec": components['schemas']["ScheduleSpec"]; "replaces": string | null};
-"Settings": {"model"?: string; "timezone"?: string; "grace"?: number; "notifications"?: boolean};
+"Settings": {"model"?: string; "timezone"?: string; "grace"?: number; "notifications"?: boolean; "style_mode"?: "single_pass" | "two_pass"};
+"StyleEditView": {"id": string; "draft_id": string; "recipient_key": string; "original": string; "edited": string; "created_at": number; "accepted_at": number | null};
 "Summary": {"upcoming_count": number; "upcoming": (components['schemas']["Occurrence"])[]; "pending_approvals": number; "saved_drafts": number; "recent_attempts": (components['schemas']["AttemptView"])[]; "scheduler": string};
 "ValidationError": {"loc": (string | number)[]; "msg": string; "type": string; "input"?: unknown; "ctx"?: {}};
 "WorkerError": {"timestamp": number; "category": string};

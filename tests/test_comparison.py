@@ -42,6 +42,38 @@ class ComparisonTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_style_study_has_three_same_model_variants_with_shared_evidence_and_blind_wording_rubric(self):
+        status, report = self.prepare(command='compare-styles', models=('qwen2.5:3b', 'qwen2.5:7b'))
+        self.assertEqual(status, 0)
+        self.assertEqual(report['trials'], 60)
+        metadata, snapshots = self.snapshots()
+        self.assertTrue(metadata['style_study'])
+        self.assertEqual({v['config']['model'] for v in metadata['variants'].values()}, {'qwen2.5:3b'})
+        self.assertEqual([v['pipeline'] for v in metadata['variants'].values()], ['improved', 'fingerprint', 'style_revision'])
+        for number in range(1, 21):
+            trials = [s for s in snapshots if s['source_case'] == number]
+            self.assertEqual(len(trials), 3)
+            self.assertEqual(trials[0]['context'], trials[1]['context'])
+            self.assertEqual(trials[1]['context'], trials[2]['context'])
+            self.assertNotIn(trials[0]['actual_reply'], json.dumps(trials[0]['context']))
+        store = ReviewStore(self.output_path, resume=True)
+        try:
+            self.assertTrue(store.summary()['variants_hidden'])
+            self.assertNotIn('variants', store.summary())
+            from imessage_agent.ollama import DraftError
+            with self.assertRaises(DraftError):
+                store.rate(store.cases()[0]['ordinal'], dict(style=4, relevance=4, naturalness=4, invents_personal_information=False))
+            for row in store.cases():
+                store.rate(row['ordinal'], dict(style=4, relevance=4, naturalness=4,
+                    invents_personal_information=False, slang_authenticity=5, formality=2))
+            report = store.summary()
+            self.assertFalse(report['variants_hidden'])
+            self.assertEqual(report['variants']['B']['wording_quality']['slang_authenticity'], 5)
+            self.assertEqual(report['variants']['C']['wording_quality']['formality'], 2)
+            self.assertIn('latency_ms', report['variants']['C'])
+        finally:
+            store.close()
+
     def test_session_comparison_freezes_twenty_cases_and_keeps_quality_separate(self):
         status, report = self.prepare(command='compare-sessions')
         self.assertEqual(status, 0)

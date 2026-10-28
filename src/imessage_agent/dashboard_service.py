@@ -8,6 +8,7 @@ from .dashboard_models import Settings
 from .drafting import generate, history
 from .evaluation import case_history
 from .contacts import Contacts
+from . import style_edits
 from .sessions import config_from_store
 from .reply_lifecycle import fresh_reason, invalidate_stale_drafts
 from .macos import MacOSMessagesReader
@@ -135,12 +136,21 @@ class DashboardService:
                     if key in generated:
                         value[key] = generated[key]
             if action == 'edit':
+                if generated is None:
+                    edit_id = style_edits.record(self.db, row, value, body)
+                    value.setdefault('original_reply', value.get('reply', ''))
+                    value['style_edit_id'] = edit_id
+                else:
+                    value.pop('style_edit_id', None)
+                    value['original_reply'] = body
                 value.update(reply=body, dashboard_status='draft', reason='edited_requires_fresh_approval',
                              validation_status='approval_required', classification='APPROVAL_REQUIRED', auto_sending=False)
             else:
                 value['dashboard_status'] = {'submit': 'pending', 'approve': 'approved',
                                              'reject': 'rejected', 'discard': 'discarded'}[action]
             if action == 'approve':
+                if value.get('style_edit_id'):
+                    style_edits.accept(self.db, value['style_edit_id'], body)
                 approval_id = uuid.uuid4().hex
                 value['dashboard_approval_id'] = approval_id
                 # Save the review state before Store.approve commits the enclosing transaction.
@@ -194,7 +204,10 @@ class DashboardService:
             rows, _ = history(reader, chats, before=target.sequence, context_chat=target.chat_id)
             rows = case_history(rows, target, reader)
             generated = generate(rows, chats, target, Ollama(ModelConfig(model=self.settings().model)),
-                                 session_config=self.session_config(), now=time.time())
+                                 session_config=self.session_config(), now=time.time(),
+                                 pipeline='style_revision' if self.settings().style_mode == 'two_pass' else 'fingerprint',
+                                 accepted_edits=style_edits.entries(self.db, source=reader.source_id,
+                                     generation=reader.generation, before=target.occurred_at))
             reason = fresh_reason(reader, target, config=self.session_config())
             if reason:
                 raise DashboardError(reason)

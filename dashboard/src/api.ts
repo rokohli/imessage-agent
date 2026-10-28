@@ -48,6 +48,9 @@ export async function request<T>(
   return response.json() as Promise<T>;
 }
 export const api = {
+  styleEdits: () => request<components["schemas"]["StyleEditView"][]>("/style-edits"),
+  deleteStyleEdit: (id: string) => request(`/style-edits/${encodeURIComponent(id)}`, "DELETE"),
+  clearStyleEdits: () => request("/style-edits", "DELETE"),
   authorizeContacts: (country_code: string | null) =>
     request<{status: string}>("/contacts/authorize", "POST", {country_code}),
   searchRecipients: (query: string) =>

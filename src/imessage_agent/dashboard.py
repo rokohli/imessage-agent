@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .account_selection import AccountSelectionError, load_account_id, save_account_id
 from .applescript import diagnose_applescript, list_imessage_accounts
 from .dashboard_models import (AccountChoice, AccountView, ApprovalAction, AttemptView, ContactPreference,
-                               ContactView, ContactsAccess, RecipientSearch, RecipientMatches, ConversationThresholds, DraftAction, DraftEdit, DraftView, Health, Occurrence,
+                               ContactView, StyleEditView, ContactsAccess, RecipientSearch, RecipientMatches, ConversationThresholds, DraftAction, DraftEdit, DraftView, Health, Occurrence,
                                Result, ScheduleInput, ScheduleView, Settings, Summary, WorkerHealth)
 from .dashboard_service import DashboardError, DashboardService
 from .macos import MacOSMessagesReader, MessagesAccessError
@@ -201,6 +201,26 @@ def create_app(state: Path, *, database: Path | None = None):
     def attempts():
         with service() as s:
             return s.attempts()
+
+    @app.get('/api/style-edits', response_model=list[StyleEditView])
+    def learned_style_edits():
+        from .style_edits import entries
+        with service() as s:
+            return entries(s.db)
+
+    @app.delete('/api/style-edits', response_model=Result)
+    def clear_style_edits():
+        from .style_edits import delete
+        with service() as s, s.db:
+            delete(s.db)
+            return Result()
+
+    @app.delete('/api/style-edits/{identifier}', response_model=Result)
+    def delete_style_edit(identifier: str):
+        from .style_edits import delete
+        with service() as s, s.db:
+            delete(s.db, identifier)
+            return Result()
 
     @app.get('/api/settings', response_model=Settings)
     def settings():

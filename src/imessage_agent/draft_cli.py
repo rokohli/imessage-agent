@@ -18,7 +18,7 @@ from .review import run_review
 from .comparison import run_comparison
 
 
-COMMANDS = ('model-health', 'build-profiles', 'draft-preview', 'evaluate-drafts', 'review-drafts', 'compare-drafts', 'compare-sessions')
+COMMANDS = ('model-health', 'build-profiles', 'draft-preview', 'evaluate-drafts', 'review-drafts', 'compare-drafts', 'compare-sessions', 'compare-styles')
 
 
 def add_commands(commands):
@@ -32,6 +32,8 @@ def add_commands(commands):
                                 help='Maximum selected history rows, including preceding context (1–200000)')
         if name in ('build-profiles', 'draft-preview'):
             parser.add_argument('--state', type=Path, required=True)
+        if name in ('draft-preview', 'review-drafts', 'evaluate-drafts'):
+            parser.add_argument('--style-mode', choices=('single_pass', 'two_pass'), default='single_pass')
         if name == 'draft-preview':
             parser.add_argument('--source-sequence', type=int, required=True)
             parser.add_argument('--show-text', action='store_true', help='Display private draft text in this terminal')
@@ -41,7 +43,7 @@ def add_commands(commands):
             parser.add_argument('--ratings', type=Path, required=True, help='Private plaintext snapshots and ratings, mode 0600, outside the repository')
             parser.add_argument('--show-text', action='store_true', help='Opt in to displaying private context, drafts and held-out replies')
             parser.add_argument('--resume', action='store_true', help='Rate saved snapshots without reading Messages or calling a model')
-        if name in ('compare-drafts', 'compare-sessions'):
+        if name in ('compare-drafts', 'compare-sessions', 'compare-styles'):
             parser.add_argument('--source-review', type=Path, required=True, help='Existing private review containing the exact 20 cases')
             parser.add_argument('--comparison', type=Path, required=True, help='New private blind-review SQLite file')
         if name == 'evaluate-drafts':
@@ -51,7 +53,7 @@ def add_commands(commands):
 def run_command(args):
     store = None
     try:
-        if args.command in ('compare-drafts', 'compare-sessions'):
+        if args.command in ('compare-drafts', 'compare-sessions', 'compare-styles'):
             report = run_comparison(args)
         elif args.command == 'review-drafts':
             report = run_review(args)
@@ -73,7 +75,8 @@ def run_command(args):
                                          context_chat=target.chat_id if target else None)
                 if args.command == 'evaluate-drafts':
                     configs = [ModelConfig.load(args.config)] + [ModelConfig.load(p) for p in args.compare_config]
-                    report = evaluate(rows, chats, configs, cases=args.cases, reader=reader)
+                    report = evaluate(rows, chats, configs, cases=args.cases, reader=reader,
+                                      pipeline='style_revision' if args.style_mode == 'two_pass' else 'fingerprint')
                 else:
                     state = _state_path(args.database, args.state)
                     store = Store(state)
@@ -83,7 +86,12 @@ def run_command(args):
                         rows = case_history(rows, target, reader)
                         config = config_from_store(store)
                         reason = fresh_reason(reader, target, config=config)
-                        draft = generate(rows, chats, target, Ollama(ModelConfig.load(args.config)), session_config=config, now=time.time(), veto=reason)
+                        from .style_edits import entries
+                        draft = generate(rows, chats, target, Ollama(ModelConfig.load(args.config)), session_config=config,
+                                         now=time.time(), veto=reason,
+                                         pipeline='style_revision' if args.style_mode == 'two_pass' else 'fingerprint',
+                                         accepted_edits=entries(store.connection, source=reader.source_id,
+                                             generation=reader.generation, before=target.occurred_at))
                         reason = reason or fresh_reason(reader, target, config=config)
                         if reason:
                             draft.update(reply='', classification='NO_REPLY', reason=reason, validation_status='no_reply', auto_sending=False)

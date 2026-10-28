@@ -80,7 +80,7 @@ def case_history(rows, incoming, reader=None):
     return sorted(preceding.values(), key=lambda message: message.sequence)
 
 
-def evaluate(rows, chats, configs, *, cases=10, provider_factory=Ollama, reader=None):
+def evaluate(rows, chats, configs, *, cases=10, provider_factory=Ollama, reader=None, pipeline='fingerprint'):
     selected = select_cases(rows, chats, cases)
     if not selected:
         raise DraftError('no_safe_historical_reply_pairs')
@@ -95,7 +95,7 @@ def evaluate(rows, chats, configs, *, cases=10, provider_factory=Ollama, reader=
             # Even profile construction and retrieval see only the preceding prefix.
             try:
                 preceding = case_history(rows, incoming, reader)
-                draft = generate(preceding, chats, incoming, provider)
+                draft = generate(preceding, chats, incoming, provider, pipeline=pipeline)
             except DraftError as error:
                 # Service/locality failures affect every case; never switch providers.
                 if str(error) in (

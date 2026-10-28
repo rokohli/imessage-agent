@@ -132,6 +132,7 @@ class Settings(Input):
     timezone: str = 'America/Chicago'
     grace: int = Field(default=300, ge=0, le=86400)
     notifications: bool = False
+    style_mode: Literal['single_pass', 'two_pass'] = 'single_pass'
 
     @field_validator('model')
     @classmethod
@@ -256,3 +257,13 @@ class RecipientMatch(BaseModel):
 class RecipientMatches(BaseModel):
     status: str
     matches: list[RecipientMatch]
+
+
+class StyleEditView(BaseModel):
+    id: str
+    draft_id: str
+    recipient_key: str
+    original: str
+    edited: str
+    created_at: float
+    accepted_at: float | None
