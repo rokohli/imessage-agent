@@ -6,6 +6,10 @@ import uuid
 from .account_selection import load_account_id
 from .dashboard_models import Settings
 from .drafting import generate, history
+from .evaluation import case_history
+from .contacts import Contacts
+from .sessions import config_from_store
+from .reply_lifecycle import fresh_reason, invalidate_stale_drafts
 from .macos import MacOSMessagesReader
 from .models import Recipient
 from .ollama import DraftError, ModelConfig, Ollama
@@ -21,6 +25,7 @@ class DashboardService:
     def __init__(self, store, database=None):
         self.store, self.db, self.database = store, store.connection, database
         self.scheduler = Scheduler(store)
+        self.names = Contacts(store)
 
     def preference(self, key, default):
         row = self.db.execute('SELECT value FROM dashboard_preferences WHERE key=?', (key,)).fetchone()
@@ -45,11 +50,20 @@ class DashboardService:
                          account_id=data.account_id)
         plan = self.scheduler.create(spec, authorized=data.confirmed, replaces=replaces,
                                      authorize_recipient=data.authorize_recipient)
-        return self.scheduler.details(plan)
+        if data.recipient_name:
+            with self.db:
+                self.db.execute('UPDATE contacts SET display_name=? WHERE recipient_key=?',
+                                (data.recipient_name, Recipient.parse(data.recipient).key))
+        return self.schedule_view(plan)
+
+    def schedule_view(self, plan_id):
+        plan = self.scheduler.details(plan_id)
+        return {**plan, 'display_name': self.names.resolve(plan['spec']['recipient'])['display_name']}
 
     def occurrences(self, plan_id=None):
         plans = {p['id']: self.scheduler.details(p['id']) for p in self.scheduler.plans()}
-        return [{**row, 'recipient': plans[row['plan_id']]['spec']['recipient']}
+        return [{**row, 'recipient': plans[row['plan_id']]['spec']['recipient'],
+                 'display_name': self.names.resolve(plans[row['plan_id']]['spec']['recipient'])['display_name']}
                 for row in self.scheduler.history(plan_id)]
 
     def draft(self, draft_id):
@@ -63,13 +77,14 @@ class DashboardService:
         recipient = Recipient.parse(row['recipient_key'].split(':', 1)[1])
         if recipient.key != row['recipient_key']:
             raise DashboardError('invalid_draft_recipient')
-        guids = list(dict.fromkeys(value.get('context_guids', []) + [row['source_guid']]))[-12:]
-        context = []
-        for guid in guids:
-            message = self.db.execute('SELECT direction,body FROM messages WHERE source_id=? AND guid=?',
-                                      (row['source_id'], guid)).fetchone()
-            if message:
-                context.append(dict(message))
+        context = value.get('historical_context', []) + value.get('context', [])
+        if not context:
+            guids = list(dict.fromkeys(value.get('context_guids', []) + [row['source_guid']]))
+            for guid in guids:
+                message = self.db.execute('SELECT direction,body,occurred_at FROM messages WHERE source_id=? AND guid=?',
+                                          (row['source_id'], guid)).fetchone()
+                if message:
+                    context.append(dict(message))
         approval_id = value.get('dashboard_approval_id')
         status = value.get('dashboard_status', 'draft')
         if status == 'approved':
@@ -77,19 +92,27 @@ class DashboardService:
             if not approval or approval.expires_at <= time.time() or approval.consumed_by:
                 status = 'expired_or_used'
         return dict(id=row['id'], recipient=recipient.address, recipient_key=recipient.key,
+                    display_name=self.names.resolve(recipient.address)['display_name'],
+                    conversation_state=value.get('conversation_state', 'UNCERTAIN'),
                     body=value.get('reply', ''), reason=value.get('reason', 'manual_review_required'),
                     status=status, revision=hashlib.sha256(row['draft_json'].encode()).hexdigest(),
                     created_at=row['created_at'], context=context, approval_id=approval_id)
 
     def drafts(self):
+        invalidate_stale_drafts(self.store, database=self.database)
         return [self.draft_view(row, json.loads(row['draft_json'])) for row in
                 self.db.execute('SELECT * FROM reply_drafts ORDER BY created_at DESC')]
 
-    def change_draft(self, draft_id, revision, action, *, body=None, recipient=None):
+    def change_draft(self, draft_id, revision, action, *, body=None, recipient=None, generated=None):
+        invalidate_stale_drafts(self.store)
+        if action in ('approve', 'submit'):
+            self.check_fresh(draft_id)
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             row, value = self.draft(draft_id)
             view = self.draft_view(row, value)
+            if action not in ('discard', 'reject') and view['status'] == 'cancelled':
+                raise DashboardError('stale_draft_requires_new_source')
             if revision != view['revision']:
                 raise DashboardError('draft_changed_refresh_before_review')
             if action == 'approve':
@@ -105,6 +128,12 @@ class DashboardService:
             previous = value.pop('dashboard_approval_id', None)
             if previous:
                 self.db.execute('UPDATE approvals SET expires_at=0 WHERE id=? AND consumed_by IS NULL', (previous,))
+            if generated is not None:
+                for key in ('context', 'historical_context', 'context_guids', 'historical_guids', 'example_guids',
+                            'style_guids', 'conversation_state', 'conversation_reason', 'starts_new_session',
+                            'references_earlier', 'session_config'):
+                    if key in generated:
+                        value[key] = generated[key]
             if action == 'edit':
                 value.update(reply=body, dashboard_status='draft', reason='edited_requires_fresh_approval',
                              validation_status='approval_required', classification='APPROVAL_REQUIRED', auto_sending=False)
@@ -122,7 +151,30 @@ class DashboardService:
         row, value = self.draft(draft_id)
         return self.draft_view(row, value)
 
+    def session_config(self):
+        return config_from_store(self.store)
+
+    def check_fresh(self, draft_id):
+        row, value = self.draft(draft_id)
+        if value.get('dashboard_status') == 'cancelled':
+            raise DashboardError('stale_draft_requires_new_source')
+        if self.database is None:
+            # Legacy synthetic/manual drafts remain reviewable; generated drafts require source evidence.
+            if value.get('session_config'):
+                raise DashboardError('explicit_messages_database_required_for_freshness')
+            return
+        with MacOSMessagesReader(self.database) as reader:
+            if reader.source_id != row['source_id'] or reader.generation != row['generation']:
+                raise DashboardError('draft_source_changed')
+            batch = reader.read_after(row['source_sequence'] - 1, 1)
+            if not batch.messages or batch.messages[0].guid != row['source_guid']:
+                raise DashboardError('draft_source_changed')
+            reason = fresh_reason(reader, batch.messages[0], config=self.session_config())
+            if reason:
+                raise DashboardError(reason)
+
     def regenerate(self, draft_id, revision):
+        self.check_fresh(draft_id)
         row, value = self.draft(draft_id)
         if self.draft_view(row, value)['revision'] != revision:
             raise DashboardError('draft_changed_refresh_before_review')
@@ -140,11 +192,16 @@ class DashboardService:
             if target.chat_id not in chats or chats[target.chat_id].key != row['recipient_key']:
                 raise DashboardError('individual_recipient_not_verified')
             rows, _ = history(reader, chats, before=target.sequence, context_chat=target.chat_id)
-            generated = generate(rows, chats, target, Ollama(ModelConfig(model=self.settings().model)))
+            rows = case_history(rows, target, reader)
+            generated = generate(rows, chats, target, Ollama(ModelConfig(model=self.settings().model)),
+                                 session_config=self.session_config(), now=time.time())
+            reason = fresh_reason(reader, target, config=self.session_config())
+            if reason:
+                raise DashboardError(reason)
         if not generated['reply'].strip():
             raise DashboardError('model_returned_no_draft')
         # Compare again after a slow model call; never overwrite a concurrent human edit.
-        return self.change_draft(draft_id, revision, 'edit', body=generated['reply'])
+        return self.change_draft(draft_id, revision, 'edit', body=generated['reply'], generated=generated)
 
     def contacts(self, query=''):
         known = {row['recipient_key']: dict(row) for row in self.db.execute('SELECT * FROM contacts')}
@@ -158,6 +215,9 @@ class DashboardService:
                 raise DashboardError('invalid_contact_identity')
             known.setdefault(key, dict(recipient_key=key, kind=recipient.kind, address=recipient.address,
                                        display_name=recipient.address, outbound_allowed=False))
+        for row in known.values():
+            resolved = self.names.resolve(row['address'])
+            row.update(display_name=resolved['display_name'])
         results = []
         for row in sorted(known.values(), key=lambda c: (c['display_name'], c['recipient_key'])):
             if query.casefold() not in (row['display_name'] + ' ' + row['address']).casefold():
@@ -165,10 +225,11 @@ class DashboardService:
             profiles = [json.loads(p[0]) for p in self.db.execute(
                 'SELECT profile_json FROM style_profiles WHERE profile_key=?', (row['recipient_key'],))]
             results.append({**row, 'outbound_allowed': bool(row['outbound_allowed']),
-                            'handles': [row['address']], 'profiles': profiles,
+                            'handles': self.names.resolve(row['address'])['handles'], 'profiles': profiles,
                             'future_auto_reply': self.preference('contact:' + row['recipient_key'], 'disabled')})
         return results
 
     def attempts(self):
-        return [dict(id=row['id'], recipient=row['address'], status=row['status'], created_at=row['created_at'])
+        return [dict(id=row['id'], recipient=row['address'], display_name=self.names.resolve(row['address'])['display_name'],
+                     status=row['status'], created_at=row['created_at'])
                 for row in self.db.execute('SELECT id,address,status,created_at FROM send_attempts ORDER BY created_at DESC')]

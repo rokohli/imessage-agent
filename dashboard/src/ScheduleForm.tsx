@@ -1,9 +1,12 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { api, type Schedule, type ScheduleInput, type Settings } from "./api";
+import type { components } from "./schema";
 import { ErrorText, errorMessage, Modal } from "./ui";
 export function validateSchedule(data: ScheduleInput) {
   if (!data.recipient.trim() || !data.body.trim())
     return "Enter an exact recipient and message.";
+  if (!/^\+[1-9][0-9]{1,14}$/.test(data.recipient) && !/^[^\s@]+@[^\s@]+$/.test(data.recipient))
+    return "Select a matching contact or enter an international number or email.";
   if (!data.start_date || !data.start_time || !data.timezone)
     return "Choose a date, time and timezone.";
   if (data.end_time && data.end_time <= data.start_time)
@@ -37,6 +40,10 @@ export function ScheduleForm({
   const s = schedule?.spec;
   const [data, setData] = useState<ScheduleInput>({
     recipient: s?.recipient ?? "",
+    recipient_name:
+      schedule?.display_name && schedule.display_name !== s?.recipient
+        ? schedule.display_name
+        : null,
     body: s?.body ?? "",
     start_date: s?.start_date ?? "",
     start_time: s?.start_time ?? "",
@@ -52,6 +59,24 @@ export function ScheduleForm({
     confirmed: true,
     authorize_recipient: false,
   });
+  const [recipientQuery, setRecipientQuery] = useState(schedule?.display_name || s?.recipient || "");
+  const [matches, setMatches] = useState<components["schemas"]["RecipientMatch"][]>([]);
+  const [searching, setSearching] = useState(false);
+  const [lookupStatus, setLookupStatus] = useState("");
+  const searchRevision = useRef(0);
+  const search = async () => {
+    const revision = ++searchRevision.current;
+    setSearching(true); setError(""); setLookupStatus(""); setMatches([]);
+    try {
+      const result = await api.searchRecipients(recipientQuery);
+      if (revision !== searchRevision.current) return;
+      setMatches(result.matches);
+      setLookupStatus(result.status === "authorized"
+        ? (result.matches.length ? "Choose the exact number or email below." : "No matching recipients found.")
+        : "Name lookup unavailable. Allow Contacts access in Settings or enter a number or email.");
+    } catch (e) { if (revision === searchRevision.current) setError(errorMessage(e)); }
+    finally { if (revision === searchRevision.current) setSearching(false); }
+  };
   const [review, setReview] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState("");
@@ -100,14 +125,35 @@ export function ScheduleForm({
           {!review ? (
             <>
               <label>
-                Exact iMessage handle
+                Recipient
                 <input
                   required
-                  value={data.recipient}
-                  onChange={(e) => change("recipient", e.target.value)}
-                  placeholder="+12025550101 or name@example.com"
+                  value={recipientQuery}
+                  onChange={(e) => {
+                    searchRevision.current++;
+                    setSearching(false); setMatches([]); setLookupStatus("");
+                    setRecipientQuery(e.target.value);
+                    setData({...data, recipient: e.target.value, recipient_name: null});
+                    setReview(false); setConfirm(false);
+                  }}
+                  placeholder="Name, international number, or email"
                 />
               </label>
+              <button type="button" disabled={searching || recipientQuery.trim().length < 2}
+                onClick={() => void search()}>{searching ? "Searching…" : "Find contact"}</button>
+              <p className="note">Searches macOS Contacts only when you click Find contact. No address book is imported.</p>
+              {lookupStatus && <p role="status">{lookupStatus}</p>}
+              {matches.length > 0 && <ul aria-label="Matching recipients">
+                {matches.map((match) => <li key={match.display_name + match.recipient_key}>
+                  <button type="button" onClick={() => {
+                    searchRevision.current++;
+                    setData({...data, recipient: match.recipient, recipient_name: match.display_name});
+                    setRecipientQuery(match.display_name); setMatches([]); setLookupStatus("");
+                    setReview(false); setConfirm(false);
+                  }}>{match.display_name} · {match.recipient}</button>
+                </li>)}
+              </ul>}
+              {data.recipient_name && <p role="status">Selected: {data.recipient_name} · {data.recipient}</p>}
               <label>
                 Message
                 <textarea
@@ -294,7 +340,8 @@ export function ScheduleForm({
           ) : (
             <div className="review">
               <p className="eyebrow">Review exact authorization</p>
-              <h3>{data.recipient}</h3>
+              <h3>{data.recipient_name || data.recipient}</h3>
+              {data.recipient_name && <p>{data.recipient}</p>}
               <p className="message">{data.body}</p>
               <dl>
                 <dt>Schedule</dt>

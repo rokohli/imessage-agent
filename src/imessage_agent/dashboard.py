@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .account_selection import AccountSelectionError, load_account_id, save_account_id
 from .applescript import diagnose_applescript, list_imessage_accounts
 from .dashboard_models import (AccountChoice, AccountView, ApprovalAction, AttemptView, ContactPreference,
-                               ContactView, DraftAction, DraftEdit, DraftView, Health, Occurrence,
+                               ContactView, ContactsAccess, RecipientSearch, RecipientMatches, ConversationThresholds, DraftAction, DraftEdit, DraftView, Health, Occurrence,
                                Result, ScheduleInput, ScheduleView, Settings, Summary, WorkerHealth)
 from .dashboard_service import DashboardError, DashboardService
 from .macos import MacOSMessagesReader, MessagesAccessError
@@ -94,7 +94,7 @@ def create_app(state: Path, *, database: Path | None = None):
     @app.get('/api/schedules', response_model=list[ScheduleView])
     def schedules():
         with service() as s:
-            return [s.scheduler.details(p['id']) for p in s.scheduler.plans()]
+            return [s.schedule_view(p['id']) for p in s.scheduler.plans()]
 
     @app.post('/api/schedules', response_model=ScheduleView)
     def create_schedule(data: ScheduleInput):
@@ -104,7 +104,7 @@ def create_app(state: Path, *, database: Path | None = None):
     @app.get('/api/schedules/{plan_id}', response_model=ScheduleView)
     def schedule(plan_id: str):
         with service() as s:
-            return s.scheduler.details(plan_id)
+            return s.schedule_view(plan_id)
 
     @app.put('/api/schedules/{plan_id}', response_model=ScheduleView)
     def edit_schedule(plan_id: str, data: ScheduleInput):
@@ -128,6 +128,27 @@ def create_app(state: Path, *, database: Path | None = None):
     def all_occurrences():
         with service() as s:
             return s.occurrences()
+
+    @app.post('/api/contacts/authorize')
+    def authorize_contacts(data: ContactsAccess):
+        with service() as s:
+            return s.names.authorize(country_code=data.country_code)
+
+    @app.post('/api/recipients/search', response_model=RecipientMatches)
+    def search_recipients(data: RecipientSearch):
+        with service() as s:
+            return s.names.search(data.query)
+
+    @app.get('/api/conversation-thresholds', response_model=ConversationThresholds)
+    def conversation_thresholds():
+        with service() as s:
+            return s.preference('conversation:thresholds', {})
+
+    @app.put('/api/conversation-thresholds', response_model=ConversationThresholds)
+    def save_conversation_thresholds(data: ConversationThresholds):
+        with service() as s:
+            s.save_preference('conversation:thresholds', data.model_dump())
+            return data
 
     @app.get('/api/contacts', response_model=list[ContactView])
     def contacts(q: Annotated[str, Query(max_length=254)] = ''):

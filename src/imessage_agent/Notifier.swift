@@ -7,7 +7,7 @@ final class Delegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         let args = CommandLine.arguments
-        let event = args.count == 2 ? args[1] : ""
+        let event = args.count >= 2 ? args[1] : ""
         if event == "authorize" {
             center.requestAuthorization(options: [.alert, .sound]) { _, _ in
                 DispatchQueue.main.async { NSApp.terminate(nil) }
@@ -32,7 +32,7 @@ final class Delegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
             }
             let content = UNMutableNotificationContent()
             content.title = "iMessage Agent"
-            content.body = message
+            content.body = args.count == 3 ? args[2] + ": " + message : message
             center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)) { _ in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { NSApp.terminate(nil) }
             }

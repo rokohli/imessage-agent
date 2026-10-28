@@ -102,7 +102,7 @@ export function Overview() {
                 state.data.upcoming.map((o) => (
                   <div className="list-row" key={o.id}>
                     <div>
-                      <b>{o.recipient}</b>
+                      <b>{o.display_name || o.recipient}</b>
                       <p className="muted">
                         {time(o.send_at)} · {o.local_date}
                       </p>
@@ -144,7 +144,7 @@ export function Overview() {
             {state.data.recent_attempts.length ? (
               state.data.recent_attempts.map((a) => (
                 <div className="list-row" key={a.id}>
-                  <b>{a.recipient}</b>
+                  <b>{a.display_name || a.recipient}</b>
                   <span className="muted">{time(a.created_at)}</span>
                   <Status value={a.status} />
                 </div>
@@ -224,7 +224,7 @@ export function Schedules() {
               return (
                 <Card key={p.id}>
                   <div className="card-heading">
-                    <h2>{p.spec.recipient}</h2>
+                    <h2>{p.display_name || p.spec.recipient}</h2>
                     <Status value={p.status} />
                   </div>
                   <p className="message">{p.spec.body}</p>
@@ -272,7 +272,7 @@ export function Schedules() {
               close={() => setSelected(undefined)}
             >
               <p>
-                {selected.spec.recipient} · {selected.spec.timezone}
+                {selected.display_name || selected.spec.recipient} · {selected.spec.timezone}
               </p>
               {state.data.occurrences
                 .filter((o) => o.plan_id === selected.id)
@@ -294,7 +294,7 @@ export function Schedules() {
               close={() => !busy && setCancel(undefined)}
             >
               <p>
-                Cancel pending occurrences for <b>{cancel.spec.recipient}</b>?
+                Cancel pending occurrences for <b>{cancel.display_name || cancel.spec.recipient}</b>?
                 History remains available. An already claimed attempt may
                 finish.
               </p>
@@ -333,13 +333,13 @@ export function Contacts() {
     <>
       <div className="toolbar">
         <input
-          aria-label="Search contacts"
-          placeholder="Search names or handles…"
+          aria-label="Filter known recipients"
+          placeholder="Filter saved recipients…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <span className="muted">
-          Known agent contacts · no address book scan
+          Known recipients · no address-book import
         </span>
       </div>
       <LoadState {...state} retry={state.refresh} />
@@ -446,10 +446,10 @@ function DraftCard({
   return (
     <Card>
       <div className="card-heading">
-        <h2>{draft.recipient}</h2>
+        <h2>{draft.display_name || draft.recipient}</h2>
         <Status value={draft.status} />
       </div>
-      <p className="eyebrow">{time(draft.created_at)}</p>
+      <p className="eyebrow">{time(draft.created_at)} · {draft.conversation_state?.replaceAll("_", " ")}</p>
       {edit ? (
         <label>
           Edit draft
@@ -475,7 +475,11 @@ function DraftCard({
           <summary>Conversation context ({draft.context.length})</summary>
           {draft.context.map((c, i) => (
             <p className="context" key={i}>
-              <b>{c.direction === "outbound" ? "You" : "Contact"}:</b>{" "}
+              {c.session_start && <small>Session starts · </small>}
+              {c.topic_boundary && <small>Topic transition · </small>}
+              {c.historical && <small>Historical context · </small>}
+              <time>{c.timestamp ?? (c.occurred_at ? time(c.occurred_at) : "Time unavailable")}</time>{" "}
+              <b>{c.direction === "outbound" ? "You" : draft.display_name || "Contact"}:</b>{" "}
               {c.body ?? "[unavailable]"}
             </p>
           ))}
@@ -573,7 +577,8 @@ function DraftCard({
           close={() => !busy && setConfirm(null)}
         >
           <p>
-            <b>{draft.recipient}</b>
+            <b>{draft.display_name && draft.display_name !== draft.recipient ? draft.display_name : draft.recipient}</b>
+            {draft.display_name && draft.display_name !== draft.recipient ? ` · ${draft.recipient}` : ""}
           </p>
           <p className="message">{draft.body}</p>
           <p>
@@ -659,14 +664,20 @@ export function Activity() {
   const rows = [
     ...(state.data?.occurrences.map((o) => ({
       id: `o:${o.id}`,
-      recipient: o.recipient,
+      recipient:
+        o.display_name && o.display_name !== o.recipient
+          ? `${o.display_name} · ${o.recipient}`
+          : o.recipient,
       status: o.status,
       at: o.send_at,
       kind: "Scheduled execution",
     })) ?? []),
     ...(state.data?.attempts.map((a) => ({
       id: `a:${a.id}`,
-      recipient: a.recipient,
+      recipient:
+        a.display_name && a.display_name !== a.recipient
+          ? `${a.display_name} · ${a.recipient}`
+          : a.recipient,
       status: a.status,
       at: a.created_at,
       kind: "Send attempt",
@@ -808,6 +819,7 @@ export function SettingsPage() {
         </p>
       )}
       <WorkerPanel />
+      <ConversationPreferences />
       <div className="two-col">
         <Card title="Application preferences">
           {state.data && (
@@ -967,4 +979,50 @@ export function SettingsPage() {
       )}
     </>
   );
+}
+
+
+function ConversationPreferences() {
+  const thresholds = useData(api.thresholds);
+  const [country, setCountry] = useState("");
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const perform = async (action: () => Promise<void>) => {
+    setBusy(true); setError("");
+    try { await action(); } catch (e) { setError(errorMessage(e)); }
+    finally { setBusy(false); }
+  };
+  return <div className="two-col">
+    <Card title="macOS Contacts">
+      <p>Type a name in the schedule recipient field and click Find contact. Only the recipient you choose for a saved schedule is stored; your address book is not imported.</p>
+      <label>Country calling code for national numbers (optional)
+        <input aria-label="Contact country calling code" value={country} maxLength={3}
+          onChange={e => setCountry(e.target.value)} inputMode="numeric" />
+      </label>
+      <div className="actions">
+        <button disabled={busy} onClick={() => void perform(async () => {
+          const result = await api.authorizeContacts(country || null); setStatus(result.status);
+        })}>Request Contacts access</button>
+      </div>
+      <p role="status">{status}</p><ErrorText error={error} />
+    </Card>
+    <Card title="Conversation timing">
+      <LoadState {...thresholds} retry={thresholds.refresh} />
+      {thresholds.data && <form onSubmit={e => {
+        e.preventDefault(); const data = new FormData(e.currentTarget);
+        void perform(async () => {
+          await api.saveThresholds({gap_seconds: Number(data.get("gap")),
+            day_gap_seconds: Number(data.get("day")), burst_seconds: Number(data.get("burst"))});
+          await thresholds.refresh(); setStatus("Conversation timing saved");
+        });
+      }}>
+        <label>Session gap (seconds)<input name="gap" type="number" min="1" max="604800" required defaultValue={thresholds.data.gap_seconds} /></label>
+        <label>Gap across midnight (seconds)<input name="day" type="number" min="1" max="86400" required defaultValue={thresholds.data.day_gap_seconds} /></label>
+        <label>Incoming burst settling (seconds)<input name="burst" type="number" min="1" max="300" required defaultValue={thresholds.data.burst_seconds} /></label>
+        <p className="note">Timing and topic continuity are heuristics. They never authorize sending.</p>
+        <button disabled={busy}>Save conversation timing</button>
+      </form>}
+    </Card>
+  </div>;
 }

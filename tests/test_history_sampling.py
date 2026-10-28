@@ -181,7 +181,8 @@ class HistorySamplingTests(unittest.TestCase):
             store.close()
         self.assertEqual(row['source_sequence'], 101)
         self.assertTrue(all(int(guid.split('-')[-1]) <= 101 for guid in draft['context_guids']))
-        self.assertNotIn('busy-group', json.dumps(model.call_args.args))
+        model.assert_not_called()
+        self.assertEqual(draft['reason'], 'manual_reply_after_source')
         rows, _, _ = self.sample(4, before=101)
         self.assertTrue(all(message.sequence < 101 for message in rows))
 

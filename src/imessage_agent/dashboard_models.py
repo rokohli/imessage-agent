@@ -35,6 +35,7 @@ class ScheduleInput(Input):
     account_id: str | None = None
     confirmed: Literal[True]
     authorize_recipient: bool = False
+    recipient_name: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class ScheduleSpec(BaseModel):
@@ -55,6 +56,7 @@ class ScheduleSpec(BaseModel):
 
 
 class ScheduleView(BaseModel):
+    display_name: str = ''
     id: str
     status: str
     spec: ScheduleSpec
@@ -74,17 +76,26 @@ class Occurrence(BaseModel):
     claimed_at: float | None
     transport_status: str | None
     recipient: str
+    display_name: str = ''
 
 
 class Context(BaseModel):
     direction: str
     body: str | None
+    occurred_at: float | None = None
+    timestamp: str | None = None
+    timezone: str | None = None
+    session_start: bool = False
+    topic_boundary: bool = False
+    historical: bool = False
 
 
 class DraftView(BaseModel):
     id: str
     recipient: str
     recipient_key: str
+    display_name: str = ''
+    conversation_state: str = 'UNCERTAIN'
     body: str
     reason: str
     status: str
@@ -178,6 +189,7 @@ class ContactView(BaseModel):
 
 class AttemptView(BaseModel):
     id: str
+    display_name: str = ''
     recipient: str
     status: str
     created_at: float
@@ -219,3 +231,28 @@ class WorkerHealth(BaseModel):
     recent_errors: list[WorkerError]
     last_outcome: str | None
     transport: str | None
+
+
+class ContactsAccess(Input):
+    country_code: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,2}$')
+
+
+class ConversationThresholds(Input):
+    gap_seconds: float = Field(default=14400, gt=0, le=604800)
+    day_gap_seconds: float = Field(default=1800, gt=0, le=86400)
+    burst_seconds: float = Field(default=15, gt=0, le=300)
+
+
+class RecipientSearch(Input):
+    query: str = Field(min_length=2, max_length=100)
+
+
+class RecipientMatch(BaseModel):
+    display_name: str
+    recipient: str
+    recipient_key: str
+
+
+class RecipientMatches(BaseModel):
+    status: str
+    matches: list[RecipientMatch]

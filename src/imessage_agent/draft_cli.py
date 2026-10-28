@@ -2,10 +2,14 @@
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 
 from .drafting import generate, history, save_draft, save_profiles
-from .evaluation import evaluate
+from .evaluation import evaluate, case_history
+from .sessions import config_from_store
+from .contacts import Contacts
+from .reply_lifecycle import fresh_reason
 from .macos import MacOSMessagesReader, MessagesAccessError
 from .ollama import DraftError, ModelConfig, Ollama
 from .storage import Store
@@ -14,7 +18,7 @@ from .review import run_review
 from .comparison import run_comparison
 
 
-COMMANDS = ('model-health', 'build-profiles', 'draft-preview', 'evaluate-drafts', 'review-drafts', 'compare-drafts')
+COMMANDS = ('model-health', 'build-profiles', 'draft-preview', 'evaluate-drafts', 'review-drafts', 'compare-drafts', 'compare-sessions')
 
 
 def add_commands(commands):
@@ -37,7 +41,7 @@ def add_commands(commands):
             parser.add_argument('--ratings', type=Path, required=True, help='Private plaintext snapshots and ratings, mode 0600, outside the repository')
             parser.add_argument('--show-text', action='store_true', help='Opt in to displaying private context, drafts and held-out replies')
             parser.add_argument('--resume', action='store_true', help='Rate saved snapshots without reading Messages or calling a model')
-        if name == 'compare-drafts':
+        if name in ('compare-drafts', 'compare-sessions'):
             parser.add_argument('--source-review', type=Path, required=True, help='Existing private review containing the exact 20 cases')
             parser.add_argument('--comparison', type=Path, required=True, help='New private blind-review SQLite file')
         if name == 'evaluate-drafts':
@@ -47,7 +51,7 @@ def add_commands(commands):
 def run_command(args):
     store = None
     try:
-        if args.command == 'compare-drafts':
+        if args.command in ('compare-drafts', 'compare-sessions'):
             report = run_comparison(args)
         elif args.command == 'review-drafts':
             report = run_review(args)
@@ -76,12 +80,19 @@ def run_command(args):
                     if args.command == 'build-profiles':
                         report = save_profiles(store, reader.source_id, reader.generation, rows, chats)
                     else:
-                        draft = generate(rows, chats, target, Ollama(ModelConfig.load(args.config)))
+                        rows = case_history(rows, target, reader)
+                        config = config_from_store(store)
+                        reason = fresh_reason(reader, target, config=config)
+                        draft = generate(rows, chats, target, Ollama(ModelConfig.load(args.config)), session_config=config, now=time.time(), veto=reason)
+                        reason = reason or fresh_reason(reader, target, config=config)
+                        if reason:
+                            draft.update(reply='', classification='NO_REPLY', reason=reason, validation_status='no_reply', auto_sending=False)
                         draft_id = save_draft(store, reader.source_id, reader.generation, draft)
                         report = {k: draft[k] for k in ('classification', 'reason', 'auto_sending', 'validation_status', 'claim_category', 'quality_flags', 'generation_attempts')}
                         report['draft_id'] = draft_id
                         if args.show_text:
                             report['reply'] = draft['reply']
+                            report['display_name'] = Contacts(store).resolve(chats[target.chat_id].address)['display_name']
                 report.update(sampling)
         print(json.dumps(report, sort_keys=True, ensure_ascii=True))
         return 130 if report.get('status') == 'interrupted' else int(report.get('status') == 'failed')

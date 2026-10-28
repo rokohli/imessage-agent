@@ -36,7 +36,7 @@ class RetrievalTests(unittest.TestCase):
         provider = FakeProvider()
         generate(rows, chats, rows[8], provider)
         prompt = json.loads(provider.prompts[0][1]['content'])
-        self.assertEqual(prompt['conversation_examples'][0]['messages'][-1]['text'], 'only the clips 😂')
+        self.assertEqual(prompt['STYLE_EXAMPLES'][0]['messages'][-1]['text'], 'only the clips 😂')
         self.assertNotIn('general_examples', prompt)  # No isolated outgoing snippets.
 
     def test_multiple_incoming_messages_are_retrieved_as_one_turn(self):
@@ -74,10 +74,10 @@ class RetrievalTests(unittest.TestCase):
         provider = FakeProvider('bruh')
         result = generate(rows, CHATS, rows[-3], provider)
         prompt = json.loads(provider.prompts[0][1]['content'])
-        # Twelve preceding messages, followed by the current incoming turn.
-        self.assertEqual(result['context_guids'], [f'g-{n}' for n in range(8, 20)] + ['g-21'])
-        self.assertEqual([row['speaker'] for row in prompt['current_conversation']],
-                         ['user' if n % 2 == 0 else 'contact' for n in range(8, 20)] + ['contact'])
+        # The complete observed active session, followed by the current incoming turn.
+        self.assertEqual(result['context_guids'], [f'g-{n}' for n in range(1, 20)] + ['g-21'])
+        self.assertEqual([row['speaker'] for row in prompt['CURRENT_SESSION']],
+                         ['user' if n % 2 == 0 else 'contact' for n in range(1, 20)] + ['contact'])
         encoded = json.dumps(provider.prompts + provider.claim_reviews)
         for forbidden in ('hidden reply', 'future text', 'other person'):
             self.assertNotIn(forbidden, encoded)
@@ -135,7 +135,7 @@ class ContextHydrationTests(unittest.TestCase):
         provider = FakeProvider('what did you mean there?')
         generate(prepared, chats, incoming, provider)
         prompt = json.loads(provider.prompts[0][1]['content'])
-        self.assertIn('another part of the question', json.dumps(prompt['current_conversation']))
+        self.assertIn('another part of the question', json.dumps(prompt['CURRENT_SESSION']))
         self.assertNotIn('unique held out actual', json.dumps(provider.prompts))
         self.assertNotIn('unique held out actual', json.dumps(provider.claim_reviews))
 

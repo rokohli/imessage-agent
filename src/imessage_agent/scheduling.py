@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from .account_selection import AccountSelectionError, validate_account_id
 from .adapters import MockMessagesAdapter
 from .applescript import AppleScriptMessagesAdapter, _literal
+from .contacts import SCHEDULED_RECIPIENT
 from .models import Recipient, SendOutcome, SendStatus, payload_hash
 from .outbound import Outbound
 
@@ -182,7 +183,7 @@ class Scheduler:
             if authorize_recipient is True:
                 db.execute('INSERT INTO contacts VALUES (?,?,?,?,1) ON CONFLICT(recipient_key) '
                            'DO UPDATE SET outbound_allowed=1',
-                           (recipient.key, recipient.kind, recipient.address, 'Scheduled recipient'))
+                           (recipient.key, recipient.kind, recipient.address, SCHEDULED_RECIPIENT))
             db.execute('INSERT INTO schedule_plans VALUES (?,?,?,?,?,?,?)',
                        (plan_id, canonical(spec), authorization_hash(spec), now,
                         'active', first.isoformat(), replaces))

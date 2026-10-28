@@ -48,6 +48,13 @@ export async function request<T>(
   return response.json() as Promise<T>;
 }
 export const api = {
+  authorizeContacts: (country_code: string | null) =>
+    request<{status: string}>("/contacts/authorize", "POST", {country_code}),
+  searchRecipients: (query: string) =>
+    request<components["schemas"]["RecipientMatches"]>("/recipients/search", "POST", {query}),
+  thresholds: () => request<components["schemas"]["ConversationThresholds"]>("/conversation-thresholds"),
+  saveThresholds: (data: components["schemas"]["ConversationThresholds"]) =>
+    request("/conversation-thresholds", "PUT", data),
   worker: () => request<components["schemas"]["WorkerHealth"]>("/worker"),
   summary: () => request<Summary>("/summary"),
   health: () => request<Health>("/health"),
